@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server/dist/index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    { 
+      "src": "/api/botsailor/whatsapp/inbound",
+      "dest": "server/dist/index.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-token"
+      },
+      "continue": true
+    },
+    {
+      "src": "/api/cutlist/view/(.*)",
+      "dest": "server/dist/index.js"
+    },
+    {
+      "src": "/api/cutlist/update/(.*)",
+      "dest": "server/dist/index.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "server/dist/index.js"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "MONGODB_URI": "@mongodb_uri",
+    "BOTSAILOR_API_KEY": "@botsailor_api_key",
+    "WHATSAPP_PHONE_NUMBER_ID": "@whatsapp_phone_number_id",
+    "GOOGLE_CREDENTIALS": "@google_credentials",
+    "BASE_URL": "@base_url"
+  },
+  "github": {
+    "silent": true
+  }
+}

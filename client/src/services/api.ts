@@ -1,0 +1,110 @@
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || (
+  window.location.hostname === 'localhost'
+    ? 'http://localhost:5000/api'
+    : '/api'
+);
+
+const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Project endpoints
+export const getProjects = async () => {
+  const response = await api.get('/projects');
+  return response.data;
+};
+
+export const getProject = async (id: string) => {
+  const response = await api.get(`/projects/${id}`);
+  return response.data;
+};
+
+export const createProject = async (projectData: any) => {
+  const response = await api.post('/projects', projectData);
+  return response.data;
+};
+
+export const updateProject = async (id: string, projectData: any) => {
+  const response = await api.put(`/projects/${id}`, projectData);
+  return response.data;
+};
+
+export const deleteProject = async (id: string) => {
+  const response = await api.delete(`/projects/${id}`);
+  return response.data;
+};
+
+// Optimizer endpoints
+export const optimizeCutting = async (data: any): Promise<any> => {
+  const response = await api.post('/optimizer/optimize', data);
+  return response.data;
+};
+
+export const getPdfUrl = (pdfId: string) => {
+  return `${API_URL}/optimizer/pdf/${pdfId}`;
+};
+
+// IQ Software endpoints
+export const exportIQData = async (solution: any, unit: number, width: number, layout: number): Promise<any> => {
+  const response = await api.post('/optimizer/export-iq', { solution, unit, width, layout });
+  return response.data;
+};
+
+export const importIQData = async (iqData: any): Promise<any> => {
+  const response = await api.post('/optimizer/import-iq', iqData);
+  return response.data;
+};
+
+// Botsailor endpoints
+export const getBotsailorStatus = async (): Promise<any> => {
+  const response = await api.get('/botsailor/status');
+  return response.data;
+};
+
+export const syncWithBotsailor = async (projectId: string, direction: 'push' | 'pull'): Promise<any> => {
+  const response = await api.post(`/botsailor/sync/${projectId}`, { direction });
+  return response.data;
+};
+
+export const getBotsailorMaterials = async (): Promise<any> => {
+  const response = await api.get('/botsailor/materials');
+  return response.data;
+};
+
+export const getBotsailorStockPieces = async (materialId: string): Promise<any> => {
+  const response = await api.get(`/botsailor/stock?materialId=${materialId}`);
+  return response.data;
+};
+
+// OCR endpoints
+export const getOCRStatus = async (id: string): Promise<any> => {
+  const response = await api.get(`/ocr/status/${id}`);
+  return response.data;
+};
+
+export const updateCutlistData = async (cutlistData: any): Promise<any> => {
+  const response = await api.put('/ocr/update', { cutlistData });
+  return response.data;
+};
+
+export const sendWhatsAppConfirmation = async (
+  phoneNumber: string,
+  cutlistData: any,
+  customerName?: string,
+  projectName?: string
+): Promise<any> => {
+  const response = await api.post('/ocr/send-whatsapp', {
+    phoneNumber,
+    cutlistData,
+    customerName,
+    projectName
+  });
+  return response.data;
+};
+
+export default api;

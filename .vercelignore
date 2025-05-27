@@ -1,0 +1,10 @@
+.git
+node_modules
+.github
+server/node_modules
+client/node_modules
+README.md
+LICENSE
+*.log
+.env
+server/.env
