@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { cutlistController } from '../controllers/cutlist.controller';
-import { processImageWithOCR, saveImageFile } from '../services/ocr.service';
+import { processImageWithOCR, saveImageFile } from '../services/ocr-disabled.service';
 import Cutlist from '../models/cutlist.model';
 
 const router = express.Router();
@@ -29,6 +29,9 @@ router.get('/view/:id', cutlistController.viewCutlistById as RequestHandler);
 // Route to update a cutlist's data
 router.post('/update/:id', cutlistController.updateCutlistById as RequestHandler);
 
+// Route to create a cutlist from n8n data
+router.post('/n8n-data', cutlistController.createFromN8nData as RequestHandler);
+
 // Route to get cutlist data as JSON
 router.get('/data/:id', cutlistController.getCutlistData as RequestHandler);
 
@@ -45,7 +48,7 @@ router.post('/process', upload.single('image'), (async (req: Request, res: Respo
 
     // Save the image
     const fileExtension = path.extname(req.file.originalname) || '.jpg';
-    const imagePath = saveImageFile(req.file.buffer, fileExtension);
+    const imagePath = await saveImageFile(req.file.buffer, fileExtension);
 
     // Process the image with OCR
     const ocrResults = await processImageWithOCR(imagePath);

@@ -2,6 +2,10 @@ import mongoose from 'mongoose';
 
 // Define the dimension schema
 const DimensionSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: () => `dim-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+  },
   width: {
     type: Number,
     required: true
@@ -14,9 +18,32 @@ const DimensionSchema = new mongoose.Schema({
     type: Number,
     default: 1
   },
+  material: {
+    type: String
+  },
   description: {
     type: String,
     default: ''
+  }
+});
+
+// Define the material schema
+const MaterialSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: () => `mat-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+  },
+  name: {
+    type: String,
+    required: true
+  },
+  type: {
+    type: String,
+    default: 'melamine'
+  },
+  thickness: {
+    type: Number,
+    default: 16
   }
 });
 
@@ -26,7 +53,9 @@ const CutlistSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  dimensions: [DimensionSchema],
+  dimensions: [DimensionSchema],   // Cut pieces
+  stockPieces: [DimensionSchema], // Stock pieces (sheets of material)
+  materials: [MaterialSchema],    // Materials available
   unit: {
     type: String,
     default: 'mm'

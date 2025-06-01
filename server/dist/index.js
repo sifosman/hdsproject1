@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -7,12 +16,16 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const mongoose_1 = __importDefault(require("mongoose"));
+const webhook_direct_controller_1 = require("./controllers/webhook-direct.controller");
 // Import routes
 const optimizer_routes_1 = __importDefault(require("./routes/optimizer.routes"));
 const project_routes_1 = __importDefault(require("./routes/project.routes"));
 const botsailor_routes_1 = __importDefault(require("./routes/botsailor.routes"));
 const ocr_routes_1 = __importDefault(require("./routes/ocr.routes"));
 const cutlist_routes_1 = __importDefault(require("./routes/cutlist.routes"));
+const n8n_routes_1 = __importDefault(require("./routes/n8n.routes"));
+const webhook_direct_routes_1 = __importDefault(require("./routes/webhook-direct.routes"));
+const debug_routes_1 = __importDefault(require("./routes/debug.routes"));
 // Load environment variables
 dotenv_1.default.config();
 // Create Express app
@@ -35,6 +48,34 @@ app.use('/api/projects', project_routes_1.default);
 app.use('/api/botsailor', botsailor_routes_1.default);
 app.use('/api/ocr', ocr_routes_1.default);
 app.use('/api/cutlist', cutlist_routes_1.default);
+app.use('/api/n8n', n8n_routes_1.default);
+app.use('/api/webhook', webhook_direct_routes_1.default);
+app.use('/api/debug', debug_routes_1.default);
+// Direct test endpoint for n8n integration
+app.get('/api/direct-test', (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: 'Direct API test endpoint is working!',
+        timestamp: new Date().toISOString()
+    });
+});
+// Direct POST endpoint for n8n data - use our webhook direct controller
+app.post('/api/direct-n8n', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        // Use our specialized webhook direct controller
+        yield webhook_direct_controller_1.webhookDirectController.processN8n(req, res);
+    }
+    catch (error) {
+        console.error('Error in direct-n8n endpoint:', error);
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                message: 'Error processing n8n data',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+}));
 // Root route
 app.get('/', (req, res) => {
     res.json({
@@ -45,7 +86,10 @@ app.get('/', (req, res) => {
             '/api/projects',
             '/api/botsailor',
             '/api/ocr',
-            '/api/cutlist'
+            '/api/cutlist',
+            '/api/n8n/process',
+            '/api/direct-test',
+            '/api/direct-n8n'
         ]
     });
 });

@@ -4,6 +4,10 @@
     {
       "src": "server/dist/index.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "client/dist/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -28,16 +32,24 @@
     {
       "src": "/api/(.*)",
       "dest": "server/dist/index.js"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "client/dist/assets/$1"
+    },
+    {
+      "src": "/favicon.ico",
+      "dest": "client/dist/favicon.ico"
+    },
+    {
+      "src": "/manifest.json",
+      "dest": "client/dist/manifest.json"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "client/dist/index.html"
     }
   ],
-  "env": {
-    "NODE_ENV": "production",
-    "MONGODB_URI": "@mongodb_uri",
-    "BOTSAILOR_API_KEY": "@botsailor_api_key",
-    "WHATSAPP_PHONE_NUMBER_ID": "@whatsapp_phone_number_id",
-    "GOOGLE_CREDENTIALS": "@google_credentials",
-    "BASE_URL": "@base_url"
-  },
   "github": {
     "silent": true
   }

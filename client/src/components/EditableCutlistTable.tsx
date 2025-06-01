@@ -31,32 +31,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import { Fab } from '@mui/material'; // Added Fab for mobile
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`cutlist-tabpanel-${index}`}
-      aria-labelledby={`cutlist-tab-${index}`}
-      {...other}
-    >
-      {value === index && (
-        <Box sx={{ p: 3 }}>
-          {children}
-        </Box>
-      )}
-    </div>
-  );
-}
+// TabPanel component removed as it's no longer needed
 
 interface StockPiece {
   id: string;
@@ -86,23 +63,40 @@ interface CutlistData {
   cutPieces: CutPiece[];
   materials: Material[];
   unit: string;
+  customerName?: string;
+  projectName?: string;
 }
 
 interface EditableCutlistTableProps {
   initialData: CutlistData;
   onSave: (data: CutlistData) => void;
   onSendWhatsApp?: (phoneNumber: string, data: CutlistData, customerName?: string, projectName?: string) => void;
+  isMobile?: boolean;
+  isConfirmed?: boolean;
 }
 
 const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({ 
   initialData, 
   onSave,
-  onSendWhatsApp
+  onSendWhatsApp,
+  isMobile,
+  isConfirmed
 }) => {
   const theme = useTheme();
+  // const isMobile = useMediaQuery(theme.breakpoints.down('sm')); // isMobile is now a prop
   
-  const [data, setData] = useState<CutlistData>(initialData);
-  const [tabValue, setTabValue] = useState(0);
+  // Ensure all required arrays exist in initialData with safe defaults
+  const safeInitialData: CutlistData = {
+    stockPieces: initialData?.stockPieces || [],
+    cutPieces: initialData?.cutPieces || [],
+    materials: initialData?.materials || [],
+    unit: initialData?.unit || 'mm',
+    customerName: initialData?.customerName,
+    projectName: initialData?.projectName
+  };
+  
+  const [data, setData] = useState<CutlistData>(safeInitialData);
+  // const [tabValue, setTabValue] = useState(0); // Removed as tabs are simplified
   const [whatsappDialogOpen, setWhatsappDialogOpen] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -112,21 +106,30 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
 
   useEffect(() => {
-    setData(initialData);
+    if (initialData) {
+      setData({
+        stockPieces: initialData.stockPieces || [], // Ensure stockPieces is always present
+        cutPieces: initialData.cutPieces || [],
+        materials: initialData.materials || [],
+        unit: initialData.unit || 'mm',
+        customerName: initialData.customerName,
+        projectName: initialData.projectName
+      });
+    }
   }, [initialData]);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
+  // const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  //   setTabValue(newValue);
+  // }; // Removed as tabs are simplified
 
-  const handleStockPieceChange = (id: string, field: keyof StockPiece, value: any) => {
-    setData(prevData => ({
-      ...prevData,
-      stockPieces: prevData.stockPieces.map(piece => 
-        piece.id === id ? { ...piece, [field]: field === 'quantity' ? parseInt(value) : parseFloat(value) } : piece
-      )
-    }));
-  };
+  // const handleStockPieceChange = (id: string, field: keyof StockPiece, value: any) => {
+  //   setData(prevData => ({
+  //     ...prevData,
+  //     stockPieces: prevData.stockPieces.map(piece => 
+  //       piece.id === id ? { ...piece, [field]: field === 'quantity' ? parseInt(value) : parseFloat(value) } : piece
+  //     )
+  //   }));
+  // }; // Stock pieces removed
 
   const handleCutPieceChange = (id: string, field: keyof CutPiece, value: any) => {
     setData(prevData => ({
@@ -137,23 +140,6 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
           [field]: field === 'quantity' ? parseInt(value) : field === 'name' ? value : parseFloat(value) 
         } : piece
       )
-    }));
-  };
-
-  const handleAddStockPiece = () => {
-    const newId = `sp-${Date.now()}`;
-    setData(prevData => ({
-      ...prevData,
-      stockPieces: [
-        ...prevData.stockPieces,
-        {
-          id: newId,
-          width: 2440,
-          length: 1220,
-          quantity: 1,
-          material: prevData.materials[0]?.id || 'default'
-        }
-      ]
     }));
   };
 
@@ -168,16 +154,9 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
           width: 500,
           length: 500,
           quantity: 1,
-          name: `Part ${prevData.cutPieces.length + 1}`
+          name: `Cut Piece ${prevData.cutPieces.length + 1}`
         }
       ]
-    }));
-  };
-
-  const handleDeleteStockPiece = (id: string) => {
-    setData(prevData => ({
-      ...prevData,
-      stockPieces: prevData.stockPieces.filter(piece => piece.id !== id)
     }));
   };
 
@@ -190,13 +169,6 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
 
   const handleSave = () => {
     // Validate data
-    if (data.stockPieces.length === 0) {
-      setSnackbarMessage('You need at least one stock piece');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-      return;
-    }
-    
     if (data.cutPieces.length === 0) {
       setSnackbarMessage('You need at least one cut piece');
       setSnackbarSeverity('error');
@@ -246,172 +218,176 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         Edit Cutting List
       </Typography>
       
-      <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="cutlist tabs">
-          <Tab label="Stock Pieces" id="cutlist-tab-0" aria-controls="cutlist-tabpanel-0" />
-          <Tab label="Cut Pieces" id="cutlist-tab-1" aria-controls="cutlist-tabpanel-1" />
-        </Tabs>
-      </Box>
-      
-      <TabPanel value={tabValue} index={0}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="subtitle1">Stock Pieces ({data.unit})</Typography>
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />}
-            onClick={handleAddStockPiece}
-            size="small"
-          >
-            Add Stock Piece
-          </Button>
-        </Box>
-        
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Width</TableCell>
-                <TableCell>Length</TableCell>
-                <TableCell>Quantity</TableCell>
-                <TableCell>Material</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {data.stockPieces.map((piece) => (
-                <TableRow key={piece.id}>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      value={piece.width}
-                      onChange={(e) => handleStockPieceChange(piece.id, 'width', e.target.value)}
-                      variant="outlined"
-                      size="small"
-                      inputProps={{ min: 0, step: 0.1 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      value={piece.length}
-                      onChange={(e) => handleStockPieceChange(piece.id, 'length', e.target.value)}
-                      variant="outlined"
-                      size="small"
-                      inputProps={{ min: 0, step: 0.1 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      value={piece.quantity}
-                      onChange={(e) => handleStockPieceChange(piece.id, 'quantity', e.target.value)}
-                      variant="outlined"
-                      size="small"
-                      inputProps={{ min: 1, step: 1 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <FormControl fullWidth size="small">
-                      <Select
-                        value={piece.material || 'default'}
-                        onChange={(e) => handleStockPieceChange(piece.id, 'material', e.target.value)}
-                      >
-                        {data.materials.map((material) => (
-                          <MenuItem key={material.id} value={material.id}>
-                            {material.name}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </TableCell>
-                  <TableCell>
-                    <IconButton onClick={() => handleDeleteStockPiece(piece.id)} color="error" size="small">
-                      <DeleteIcon />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </TabPanel>
-      
-      <TabPanel value={tabValue} index={1}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="subtitle1">Cut Pieces ({data.unit})</Typography>
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />}
+      {isMobile ? (
+        // Mobile Card View
+        <Box sx={{ p: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="subtitle1">
+              Cut Pieces ({data.unit})
+            </Typography>
+          </Box>
+          {data.cutPieces.map((piece, index) => (
+            <Paper key={piece.id} elevation={2} sx={{ p: 2, mb: 2 }}>
+              <Typography variant="caption" display="block" gutterBottom>Name</Typography>
+              <TextField
+                fullWidth
+                value={piece.name || ''}
+                onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
+                placeholder={`Cut Piece ${index + 1}`}
+                variant="outlined"
+                size="small"
+                sx={{ mb: 1.5 }}
+                disabled={isConfirmed}
+              />
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
+                <Box sx={{ width: '48%' }}>
+                  <Typography variant="caption" display="block" gutterBottom>Length ({data.unit})</Typography>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    value={piece.length}
+                    onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)}
+                    variant="outlined"
+                    size="small"
+                    inputProps={{ min: 0, step: 0.1 }}
+                    disabled={isConfirmed}
+                  />
+                </Box>
+                <Box sx={{ width: '48%' }}>
+                  <Typography variant="caption" display="block" gutterBottom>Width ({data.unit})</Typography>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    value={piece.width}
+                    onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)}
+                    variant="outlined"
+                    size="small"
+                    inputProps={{ min: 0, step: 0.1 }}
+                    disabled={isConfirmed}
+                  />
+                </Box>
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box sx={{ width: '48%' }}>
+                  <Typography variant="caption" display="block" gutterBottom>Quantity</Typography>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    value={piece.quantity}
+                    onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)}
+                    variant="outlined"
+                    size="small"
+                    inputProps={{ min: 1, step: 1 }}
+                    disabled={isConfirmed}
+                  />
+                </Box>
+                <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" size="small" sx={{ mt: 2}} disabled={isConfirmed}>
+                  <DeleteIcon />
+                </IconButton>
+              </Box>
+            </Paper>
+          ))}
+          <Fab 
+            color="primary" 
+            aria-label="add cut piece" 
+            sx={{ position: 'fixed', bottom: 16, right: 16 }} 
             onClick={handleAddCutPiece}
-            size="small"
+            disabled={isConfirmed}
           >
-            Add Cut Piece
-          </Button>
+            <AddIcon />
+          </Fab>
         </Box>
-        
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Width</TableCell>
-                <TableCell>Length</TableCell>
-                <TableCell>Quantity</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {data.cutPieces.map((piece) => (
-                <TableRow key={piece.id}>
-                  <TableCell>
-                    <TextField
-                      value={piece.name || ''}
-                      onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
-                      variant="outlined"
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      value={piece.width}
-                      onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)}
-                      variant="outlined"
-                      size="small"
-                      inputProps={{ min: 0, step: 0.1 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      value={piece.length}
-                      onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)}
-                      variant="outlined"
-                      size="small"
-                      inputProps={{ min: 0, step: 0.1 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      value={piece.quantity}
-                      onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)}
-                      variant="outlined"
-                      size="small"
-                      inputProps={{ min: 1, step: 1 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" size="small">
-                      <DeleteIcon />
-                    </IconButton>
-                  </TableCell>
+      ) : (
+        // Desktop Table View
+        <Box sx={{ p: 3 }}>
+          <Box sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            mb: 2 
+          }}>
+            <Typography variant="subtitle1">
+              Cut Pieces ({data.unit})
+            </Typography>
+            <Button 
+              variant="contained" 
+              startIcon={<AddIcon />}
+              onClick={handleAddCutPiece}
+              size="small"
+              disabled={isConfirmed}
+            >
+              Add Cut Piece
+            </Button>
+          </Box>
+          <TableContainer component={Paper} elevation={2} sx={{ maxHeight: 400, overflowY: 'auto', overflowX: 'auto' }}>
+            <Table stickyHeader size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Name/Desc</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Width ({data.unit})</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Length ({data.unit})</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Quantity</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </TabPanel>
+              </TableHead>
+              <TableBody>
+                {data.cutPieces.map((piece, index) => (
+                  <TableRow key={piece.id}>
+                    <TableCell>
+                      <TextField
+                        value={piece.name || `Cut Piece ${index + 1}`}
+                        onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
+                        placeholder={`Cut Piece ${index + 1}`}
+                        variant="outlined"
+                        size="small"
+                        disabled={isConfirmed}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        type="number"
+                        value={piece.width}
+                        onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)}
+                        variant="outlined"
+                        size="small"
+                        inputProps={{ min: 0, step: 0.1 }}
+                        disabled={isConfirmed}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        type="number"
+                        value={piece.length}
+                        onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)}
+                        variant="outlined"
+                        size="small"
+                        inputProps={{ min: 0, step: 0.1 }}
+                        disabled={isConfirmed}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        type="number"
+                        value={piece.quantity}
+                        onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)}
+                        variant="outlined"
+                        size="small"
+                        inputProps={{ min: 1, step: 1 }}
+                        disabled={isConfirmed}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" size="small" disabled={isConfirmed}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
       
       <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
         <Button 
@@ -419,6 +395,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
           color="primary" 
           startIcon={<SaveIcon />}
           onClick={handleSave}
+          disabled={isConfirmed} // Disable save if confirmed
         >
           Save Cutlist
         </Button>

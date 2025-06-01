@@ -11,6 +11,9 @@ import Home from './pages/Home';
 import ProjectList from './pages/ProjectList';
 import ProjectDetail from './pages/ProjectDetail';
 import Optimizer from './pages/Optimizer';
+import WhatsAppUpload from './pages/WhatsAppUpload';
+import CutlistEdit from './pages/CutlistEdit';
+import CutlistDemo from './pages/CutlistDemo';
 import NotFound from './pages/NotFound';
 
 const theme = createTheme({
@@ -115,6 +118,9 @@ function App() {
               <Route path="/projects" element={<ProjectList />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/optimizer" element={<Optimizer />} />
+              <Route path="/upload" element={<WhatsAppUpload />} />
+              <Route path="/cutlist-edit/:id" element={<CutlistEdit />} />
+              <Route path="/cutlist-demo" element={<CutlistDemo />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Box>

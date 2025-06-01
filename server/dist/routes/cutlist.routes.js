@@ -17,7 +17,7 @@ const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const cutlist_controller_1 = require("../controllers/cutlist.controller");
-const ocr_service_1 = require("../services/ocr.service");
+const ocr_disabled_service_1 = require("../services/ocr-disabled.service");
 const cutlist_model_1 = __importDefault(require("../models/cutlist.model"));
 const router = express_1.default.Router();
 // Configure multer for image uploads
@@ -39,6 +39,8 @@ const upload = (0, multer_1.default)({
 router.get('/view/:id', cutlist_controller_1.cutlistController.viewCutlistById);
 // Route to update a cutlist's data
 router.post('/update/:id', cutlist_controller_1.cutlistController.updateCutlistById);
+// Route to create a cutlist from n8n data
+router.post('/n8n-data', cutlist_controller_1.cutlistController.createFromN8nData);
 // Route to get cutlist data as JSON
 router.get('/data/:id', cutlist_controller_1.cutlistController.getCutlistData);
 // API endpoint to get all cutlists
@@ -52,9 +54,9 @@ router.post('/process', upload.single('image'), ((req, res) => __awaiter(void 0,
         }
         // Save the image
         const fileExtension = path_1.default.extname(req.file.originalname) || '.jpg';
-        const imagePath = (0, ocr_service_1.saveImageFile)(req.file.buffer, fileExtension);
+        const imagePath = yield (0, ocr_disabled_service_1.saveImageFile)(req.file.buffer, fileExtension);
         // Process the image with OCR
-        const ocrResults = yield (0, ocr_service_1.processImageWithOCR)(imagePath);
+        const ocrResults = yield (0, ocr_disabled_service_1.processImageWithOCR)(imagePath);
         // Create a new cutlist
         const cutlist = new cutlist_model_1.default({
             rawText: ocrResults.rawText,
@@ -87,7 +89,7 @@ router.get('/process-sample', ((req, res) => __awaiter(void 0, void 0, void 0, f
             return res.status(404).json({ success: false, message: 'Sample cutlist.jpg not found' });
         }
         // Process the image with OCR
-        const ocrResults = yield (0, ocr_service_1.processImageWithOCR)(sampleImagePath);
+        const ocrResults = yield (0, ocr_disabled_service_1.processImageWithOCR)(sampleImagePath);
         // Create a new cutlist
         const cutlist = new cutlist_model_1.default({
             rawText: ocrResults.rawText,

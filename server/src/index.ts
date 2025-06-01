@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { n8nController } from './controllers/n8n.controller';
+import { webhookDirectController } from './controllers/webhook-direct.controller';
 
 // Import routes
 import optimizerRoutes from './routes/optimizer.routes';
@@ -9,6 +11,9 @@ import projectRoutes from './routes/project.routes';
 import botsailorRoutes from './routes/botsailor.routes';
 import ocrRoutes from './routes/ocr.routes';
 import cutlistRoutes from './routes/cutlist.routes';
+import n8nRoutes from './routes/n8n.routes';
+import webhookDirectRoutes from './routes/webhook-direct.routes';
+import debugRoutes from './routes/debug.routes';
 
 // Load environment variables
 dotenv.config();
@@ -37,6 +42,35 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/botsailor', botsailorRoutes);
 app.use('/api/ocr', ocrRoutes);
 app.use('/api/cutlist', cutlistRoutes);
+app.use('/api/n8n', n8nRoutes);
+app.use('/api/webhook', webhookDirectRoutes);
+app.use('/api/debug', debugRoutes);
+
+// Direct test endpoint for n8n integration
+app.get('/api/direct-test', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Direct API test endpoint is working!',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Direct POST endpoint for n8n data - use our webhook direct controller
+app.post('/api/direct-n8n', async (req, res) => {
+  try {
+    // Use our specialized webhook direct controller
+    await webhookDirectController.processN8n(req, res);
+  } catch (error) {
+    console.error('Error in direct-n8n endpoint:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: 'Error processing n8n data',
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+});
 
 // Root route
 app.get('/', (req, res) => {
@@ -48,7 +82,10 @@ app.get('/', (req, res) => {
       '/api/projects',
       '/api/botsailor',
       '/api/ocr',
-      '/api/cutlist'
+      '/api/cutlist',
+      '/api/n8n/process',
+      '/api/direct-test',
+      '/api/direct-n8n'
     ]
   });
 });
