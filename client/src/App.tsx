@@ -99,8 +99,7 @@ function App() {
             display: 'flex',
             flexDirection: 'column',
             minHeight: '100vh',
-            width: '100%',
-            overflow: 'hidden'
+            width: '100%'
           }}
         >
           <Header />

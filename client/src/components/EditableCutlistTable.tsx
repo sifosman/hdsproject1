@@ -319,7 +319,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
               Add Cut Piece
             </Button>
           </Box>
-          <TableContainer component={Paper} elevation={2} sx={{ maxHeight: 400, overflowY: 'auto', overflowX: 'auto' }}>
+          <TableContainer component={Paper} elevation={2}>
             <Table stickyHeader size="small">
               <TableHead>
                 <TableRow>
