@@ -49,6 +49,7 @@ interface CutPiece {
   length: number;
   quantity: number;
   name?: string;
+  edging?: number; // in mm, always 1mm
 }
 
 interface Material {
@@ -88,7 +89,10 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   // Ensure all required arrays exist in initialData with safe defaults
   const safeInitialData: CutlistData = {
     stockPieces: initialData?.stockPieces || [],
-    cutPieces: initialData?.cutPieces || [],
+    cutPieces: (initialData?.cutPieces || []).map(piece => ({
+      ...piece,
+      edging: piece.edging ?? 1
+    })),
     materials: initialData?.materials || [],
     unit: initialData?.unit || 'mm',
     customerName: initialData?.customerName,
@@ -154,7 +158,8 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
           width: 500,
           length: 500,
           quantity: 1,
-          name: `Cut Piece ${prevData.cutPieces.length + 1}`
+          name: `Cut Piece ${prevData.cutPieces.length + 1}`,
+          edging: 1
         }
       ]
     }));
@@ -240,7 +245,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                 disabled={isConfirmed}
               />
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
-                <Box sx={{ width: '48%' }}>
+                <Box sx={{ width: '31%' }}>
                   <Typography variant="caption" display="block" gutterBottom>Length ({data.unit})</Typography>
                   <TextField
                     fullWidth
@@ -253,7 +258,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                     disabled={isConfirmed}
                   />
                 </Box>
-                <Box sx={{ width: '48%' }}>
+                <Box sx={{ width: '31%' }}>
                   <Typography variant="caption" display="block" gutterBottom>Width ({data.unit})</Typography>
                   <TextField
                     fullWidth
@@ -264,6 +269,17 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                     size="small"
                     inputProps={{ min: 0, step: 0.1 }}
                     disabled={isConfirmed}
+                  />
+                </Box>
+                <Box sx={{ width: '31%' }}>
+                  <Typography variant="caption" display="block" gutterBottom>Edging (mm)</Typography>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    value={piece.edging ?? 1}
+                    variant="outlined"
+                    size="small"
+                    disabled
                   />
                 </Box>
               </Box>
@@ -326,6 +342,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                   <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Name/Desc</TableCell>
                   <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Width ({data.unit})</TableCell>
                   <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Length ({data.unit})</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Edging (mm)</TableCell>
                   <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Quantity</TableCell>
                   <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Actions</TableCell>
                 </TableRow>
@@ -363,6 +380,15 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                         size="small"
                         inputProps={{ min: 0, step: 0.1 }}
                         disabled={isConfirmed}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        type="number"
+                        value={piece.edging ?? 1}
+                        variant="outlined"
+                        size="small"
+                        disabled
                       />
                     </TableCell>
                     <TableCell>

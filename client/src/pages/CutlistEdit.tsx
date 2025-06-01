@@ -391,18 +391,6 @@ const CutlistEdit: React.FC = () => {
           </Paper>
       )}
 
-      {/* Debug data display - kept as per user preference */}
-      <Paper elevation={1} sx={{ mb: 4, p:2, backgroundColor: '#f9f9f9' }}>
-        <Typography variant="h6" gutterBottom>Debug Information</Typography>
-        <Typography variant="body2" sx={{ mt: 1, mb: 1 }}>Data Loading Status: {loading ? 'Loading...' : (error ? `Error: ${error}`: 'Complete')}</Typography>
-        <Typography variant="body2" sx={{ mb: 1 }}>Saving Status: {saving ? 'Saving...' : 'Idle'}</Typography>
-        <Typography variant="body2" sx={{ mb: 1 }}>Confirmed Status (UI): {isDataConfirmed ? 'Confirmed' : 'Not Confirmed'}</Typography>
-        {cutlistData && (
-          <pre style={{ background: '#eee', padding: '10px', borderRadius: '4px', overflow: 'auto', maxHeight: '200px', fontSize: '0.8em' }}>
-            {JSON.stringify(cutlistData, null, 2)}
-          </pre>
-        )}
-      </Paper>
 
       {/* Dialogs and Snackbars - Positioned at the end of the container is fine */}
       <Dialog
