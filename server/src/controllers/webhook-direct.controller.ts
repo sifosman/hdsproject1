@@ -223,7 +223,7 @@ export const webhookDirectController = {
           }
         };
         
-        console.log('Sending webhook with exact WhatsApp API format:', payload);
+        console.log('WEBHOOK DEBUG: Sending with exact WhatsApp API format:', payload);
         
         const response = await axios.post(WEBHOOK_URL, payload, {
           headers: { 'Content-Type': 'application/json' },
