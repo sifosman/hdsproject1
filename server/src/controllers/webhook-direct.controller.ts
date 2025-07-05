@@ -188,18 +188,22 @@ export const webhookDirectController = {
       
       // Try four different webhook payload formats
       try {
-        // Format 1: Standard webhook format with recipient field
+        // Format 1: WhatsApp API compliant format
         const format1 = {
-          recipient: phoneNumber,
-          message: quoteId ? 
-            `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-            `Your cutting list is ready! View it here: ${cutlistUrl}`,
-          customer_name: senderName,
-          dimensions_count: dimensionsCount,
-          url: cutlistUrl,
-          quote_id: quoteId || undefined,
-          quote_url: quoteUrl || undefined,
-          pricing_found: pricingData.length > 0
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: phoneNumber,
+          type: 'text',
+          text: {
+            body: quoteId ? 
+              `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+              `Your cutting list is ready! View it here: ${cutlistUrl}`
+          },
+          metadata: {
+            quote_id: quoteId || undefined,
+            quote_url: quoteUrl || undefined,
+            pricing_found: pricingData.length > 0
+          }
         };
         
         console.log('Trying format 1...');
@@ -222,18 +226,17 @@ export const webhookDirectController = {
         console.log('Format 1 failed, trying format 2...');
         
         try {
-          // Format 2: phone_number field instead of recipient
+          // Format 2: WhatsApp API compliant format with phone_number field
           const format2 = {
-            phone_number: phoneNumber,
-            message: quoteId ? 
-              `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-              `Your cutting list is ready! View it here: ${cutlistUrl}`,
-            customer_name: senderName,
-            dimensions_count: dimensionsCount,
-            url: cutlistUrl,
-            quote_id: quoteId || undefined,
-            quote_url: quoteUrl || undefined,
-            pricing_found: pricingData.length > 0
+            messaging_product: 'whatsapp',
+            to: phoneNumber, // WhatsApp API uses 'to' not 'phone_number'
+            type: 'text',
+            text: {
+              body: quoteId ? 
+                `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+                `Your cutting list is ready! View it here: ${cutlistUrl}`
+            },
+            // Additional metadata parameters can be included in URL parameters or headers
           };
           
           const response2 = await axios.post(WEBHOOK_URL, format2, {
@@ -285,16 +288,18 @@ export const webhookDirectController = {
             console.log('Format 3 failed, trying format 4...');
             
             try {
-              // Format 4: Simplified JSON
+              // Format 4: Fully simplified WhatsApp API compliant format
               const format4 = {
+                messaging_product: 'whatsapp',
                 to: phoneNumber,
-                body: quoteId ? 
-                  `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-                  `Your cutting list is ready! View it here: ${cutlistUrl}`,
-                from: "Freecut",
-                quote_id: quoteId || undefined,
-                quote_url: quoteUrl || undefined,
-                pricing_found: pricingData.length > 0
+                type: 'text',
+                text: {
+                  body: quoteId ? 
+                    `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+                    `Your cutting list is ready! View it here: ${cutlistUrl}`
+                },
+                // Other fields in a separate request if needed
+                // or passed as URL parameters instead
               };
               
               const response4 = await axios.post(WEBHOOK_URL, format4, {
