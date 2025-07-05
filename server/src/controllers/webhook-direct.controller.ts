@@ -18,14 +18,17 @@ export const webhookDirectController = {
       console.log('==== WEBHOOK DIRECT TEST ====');
       console.log('Testing webhook with direct payload to URL:', WEBHOOK_URL);
       
-      // Send a Botsailor compatible payload (WhatsApp API format)
-      const response = await axios.post(WEBHOOK_URL, {
+      // Send the exact WhatsApp API format required by Botsailor
+      const testPayload = {
         to: '+27822222222', // Use a test phone number with + prefix
         type: 'text',
         text: {
           body: 'Test message from Freecut API to Botsailor webhook'
         }
-      }, {
+      };
+      
+      console.log('Sending test webhook with exact format:', testPayload);
+      const response = await axios.post(WEBHOOK_URL, testPayload, {
         headers: {
           'Content-Type': 'application/json'
         },
@@ -204,145 +207,59 @@ export const webhookDirectController = {
         quoteCreated: !!quoteId
       });
       
-      // Try four different webhook payload formats
+      // Use only the exact WhatsApp API format required by Botsailor
       try {
-        // Format 1: WhatsApp API format for Botsailor
-        const format1 = {
+        // Create the message body
+        const messageBody = quoteId ? 
+          `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+          `Your cutting list is ready! View it here: ${cutlistUrl}`;
+        
+        // Exact format as specified by WhatsApp API
+        const payload = {
           to: phoneNumber,
           type: 'text',
           text: {
-            body: quoteId ? 
-              `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-              `Your cutting list is ready! View it here: ${cutlistUrl}`
+            body: messageBody
           }
         };
         
-        console.log('Trying format 1...');
-        const response1 = await axios.post(WEBHOOK_URL, format1, {
+        console.log('Sending webhook with exact WhatsApp API format:', payload);
+        
+        const response = await axios.post(WEBHOOK_URL, payload, {
           headers: { 'Content-Type': 'application/json' },
           timeout: 10000
         });
         
-        console.log('Format 1 succeeded!', response1.status);
+        console.log('Webhook sent successfully:', response.status);
         return res.status(200).json({
           success: true,
-          message: 'Webhook sent successfully using format 1',
-          format: format1,
+          message: 'Webhook sent successfully',
+          payload: payload,
           response: {
-            status: response1.status,
-            data: response1.data
+            status: response.status,
+            data: response.data
+          },
+          additionalData: {
+            quoteId: quoteId || null,
+            quoteUrl: quoteUrl || null,
+            customerName: senderName,
+            dimensionsCount: dimensionsCount,
+            pricingFound: pricingData.length > 0
           }
         });
-      } catch (error1) {
-        console.log('Format 1 failed, trying format 2...');
-        
-        try {
-          // Format 2: Alternative WhatsApp API format
-          const format2 = {
-            to: phoneNumber,
-            type: 'text',
-            text: {
-              body: quoteId ? 
-                `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-                `Your cutting list is ready! View it here: ${cutlistUrl}`
-            }
-          };
-          
-          const response2 = await axios.post(WEBHOOK_URL, format2, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 10000
-          });
-          
-          console.log('Format 2 succeeded!', response2.status);
-          return res.status(200).json({
-            success: true,
-            message: 'Webhook sent successfully using format 2',
-            format: format2,
-            response: {
-              status: response2.status,
-              data: response2.data
-            }
-          });
-        } catch (error2) {
-          console.log('Format 2 failed, trying format 3...');
-          
-          try {
-            // Format 3: Using query parameters
-            const params = new URLSearchParams({
-              phone: phoneNumber.replace(/[^0-9]/g, ''),
-              message: quoteId ? 
-                `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-                `Your cutting list is ready! View it here: ${cutlistUrl}`,
-              name: senderName,
-              quote_id: quoteId || '',
-              quote_url: quoteUrl || '',
-              pricing_found: pricingData.length > 0 ? 'true' : 'false'
-            });
-            
-            const response3 = await axios.get(`${WEBHOOK_URL}?${params.toString()}`, {
-              timeout: 10000
-            });
-            
-            console.log('Format 3 succeeded!', response3.status);
-            return res.status(200).json({
-              success: true,
-              message: 'Webhook sent successfully using format 3 (GET)',
-              format: { url: `${WEBHOOK_URL}?${params.toString()}` },
-              response: {
-                status: response3.status,
-                data: response3.data
-              }
-            });
-          } catch (error3) {
-            console.log('Format 3 failed, trying format 4...');
-            
-            try {
-              // Format 4: Fully simplified WhatsApp API compliant format
-              const format4 = {
-                messaging_product: 'whatsapp',
-                to: phoneNumber,
-                type: 'text',
-                text: {
-                  body: quoteId ? 
-                    `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-                    `Your cutting list is ready! View it here: ${cutlistUrl}`
-                },
-                // Other fields in a separate request if needed
-                // or passed as URL parameters instead
-              };
-              
-              const response4 = await axios.post(WEBHOOK_URL, format4, {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 10000
-              });
-              
-              console.log('Format 4 succeeded!', response4.status);
-              return res.status(200).json({
-                success: true,
-                message: 'Webhook sent successfully using format 4',
-                format: format4,
-                response: {
-                  status: response4.status,
-                  data: response4.data
-                }
-              });
-            } catch (error4) {
-              // All formats failed
-              console.error('All webhook formats failed');
-              
-              return res.status(500).json({
-                success: false,
-                message: 'All webhook formats failed',
-                errors: {
-                  format1: (error1 as Error).message,
-                  format2: (error2 as Error).message,
-                  format3: (error3 as Error).message,
-                  format4: (error4 as Error).message
-                }
-              });
-            }
-          }
+      } catch (error: any) {
+        console.error('Webhook sending failed:', error.message);
+        if (error.response) {
+          console.error('Response status:', error.response.status);
+          console.error('Response data:', error.response.data);
         }
+        
+        return res.status(500).json({
+          success: false,
+          message: 'Webhook sending failed',
+          error: error.message,
+          errorResponse: error.response?.data
+        });
       }
     } catch (error: any) {
       console.error('Error processing n8n data:', error.message);
