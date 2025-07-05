@@ -18,14 +18,11 @@ export const webhookDirectController = {
       console.log('==== WEBHOOK DIRECT TEST ====');
       console.log('Testing webhook with direct payload to URL:', WEBHOOK_URL);
       
-      // Send a WhatsApp API compliant payload
+      // Send a Botsailor compatible payload (original format)
       const response = await axios.post(WEBHOOK_URL, {
-        messaging_product: 'whatsapp',
-        to: '+27822222222', // Use a test phone number with + prefix
-        type: 'text',
-        text: {
-          body: 'Test message from Freecut API to Botsailor webhook'
-        }
+        recipient: '+27822222222', // Use a test phone number with + prefix
+        message: 'Test message from Freecut API to Botsailor webhook',
+        timestamp: new Date().toISOString()
       }, {
         headers: {
           'Content-Type': 'application/json'
@@ -197,22 +194,18 @@ export const webhookDirectController = {
       
       // Try four different webhook payload formats
       try {
-        // Format 1: WhatsApp API compliant format
+        // Format 1: Original Botsailor format (the one that works)
         const format1 = {
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to: phoneNumber,
-          type: 'text',
-          text: {
-            body: quoteId ? 
-              `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-              `Your cutting list is ready! View it here: ${cutlistUrl}`
-          },
-          metadata: {
-            quote_id: quoteId || undefined,
-            quote_url: quoteUrl || undefined,
-            pricing_found: pricingData.length > 0
-          }
+          recipient: phoneNumber,
+          message: quoteId ? 
+            `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+            `Your cutting list is ready! View it here: ${cutlistUrl}`,
+          customer_name: senderName,
+          dimensions_count: dimensionsCount,
+          url: cutlistUrl,
+          quote_id: quoteId || undefined,
+          quote_url: quoteUrl || undefined,
+          pricing_found: pricingData.length > 0
         };
         
         console.log('Trying format 1...');
@@ -235,17 +228,18 @@ export const webhookDirectController = {
         console.log('Format 1 failed, trying format 2...');
         
         try {
-          // Format 2: WhatsApp API compliant format with phone_number field
+          // Format 2: Alternative Botsailor format
           const format2 = {
-            messaging_product: 'whatsapp',
-            to: phoneNumber, // WhatsApp API uses 'to' not 'phone_number'
-            type: 'text',
-            text: {
-              body: quoteId ? 
-                `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
-                `Your cutting list is ready! View it here: ${cutlistUrl}`
-            },
-            // Additional metadata parameters can be included in URL parameters or headers
+            phone_number: phoneNumber,
+            message: quoteId ? 
+              `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+              `Your cutting list is ready! View it here: ${cutlistUrl}`,
+            customer_name: senderName,
+            dimensions_count: dimensionsCount,
+            url: cutlistUrl,
+            quote_id: quoteId || undefined,
+            quote_url: quoteUrl || undefined,
+            pricing_found: pricingData.length > 0
           };
           
           const response2 = await axios.post(WEBHOOK_URL, format2, {
