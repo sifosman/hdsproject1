@@ -9,11 +9,13 @@ import { webhookDirectController } from './controllers/webhook-direct.controller
 import optimizerRoutes from './routes/optimizer.routes';
 import projectRoutes from './routes/project.routes';
 import botsailorRoutes from './routes/botsailor.routes';
+import iqretailRoutes from './routes/iqretail.routes';
 import ocrRoutes from './routes/ocr.routes';
 import cutlistRoutes from './routes/cutlist.routes';
 import n8nRoutes from './routes/n8n.routes';
 import webhookDirectRoutes from './routes/webhook-direct.routes';
 import debugRoutes from './routes/debug.routes';
+import supabaseRoutes from './routes/supabase.routes';
 
 // Load environment variables
 dotenv.config();
@@ -45,6 +47,8 @@ app.use('/api/cutlist', cutlistRoutes);
 app.use('/api/n8n', n8nRoutes);
 app.use('/api/webhook', webhookDirectRoutes);
 app.use('/api/debug', debugRoutes);
+app.use('/api/iqretail', iqretailRoutes);
+app.use('/api/supabase', supabaseRoutes);
 
 // Direct test endpoint for n8n integration
 app.get('/api/direct-test', (req, res) => {

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
+import SupabaseService from '../services/supabase.service';
 
 // Hard-coded webhook URL for direct testing
 const WEBHOOK_URL = 'https://www.botsailor.com/webhook/whatsapp-workflow/145613.157394.183999.1748553417';
@@ -103,11 +104,86 @@ export const webhookDirectController = {
       const dimensionsCount = ocrText ? 
         ocrText.split('\n').filter((line: string) => /\d+\s*[xX]\s*\d+/.test(line)).length : 0;
       
+      // Extract potential product codes from OCR text
+      // This is a simplified example - in production you'd need proper parsing based on your specific format
+      const productCodesRegex = /(?:product|item)\s*(?:code|id)?[:\s]*(\w+)/gi;
+      const productCodes: string[] = [];
+      let match;
+      
+      while ((match = productCodesRegex.exec(ocrText)) !== null) {
+        productCodes.push(match[1]);
+      }
+      
+      // If no product codes found from regex, use some default test codes
+      if (productCodes.length === 0) {
+        // Add some sample product codes for testing
+        productCodes.push('BOARD001');
+        productCodes.push('EDGE002');
+      }
+      
+      console.log('Extracted product codes:', productCodes);
+      
+      // Attempt to get pricing from Supabase
+      let pricingData = [];
+      let quoteUrl = '';
+      let quoteId = '';
+      
+      try {
+        // Get pricing for each product code
+        for (const code of productCodes) {
+          try {
+            const pricing = await SupabaseService.getProductPricing(code);
+            if (pricing && pricing.success) {
+              pricingData.push({
+                productCode: code,
+                price: pricing.data, // This would need parsing based on the actual response structure
+              });
+            }
+          } catch (pricingError) {
+            console.error(`Error getting pricing for product ${code}:`, pricingError);
+          }
+        }
+        
+        // If pricing data was successfully retrieved, create a quote
+        if (pricingData.length > 0) {
+          try {
+            // Sample quote creation - in production, you'd construct this from the actual data
+            const quoteData = {
+              customerName: senderName,
+              customerEmail: req.body.email || 'customer@example.com',
+              customerTelephone: phoneNumber,
+              cutlistUrl: cutlistUrl,
+              items: pricingData.map(item => ({
+                stockCode: item.price.productCode,
+                description: item.price.description || `Product ${item.productCode}`,
+                quantity: 1,
+                priceExclusive: item.price?.price || 100, // Default price if not found
+                lineTotal: item.price?.price || 100,
+              })),
+              total: pricingData.reduce((sum, item) => sum + (item.price?.price || 100), 0),
+            };
+            
+            const quoteResult = await SupabaseService.createQuote(quoteData);
+            if (quoteResult && quoteResult.success) {
+              quoteId = quoteResult.data?.quoteNumber || 'Q' + uniqueId;
+              quoteUrl = `${baseUrl}/quote/${quoteId}`;
+              console.log('Quote created successfully:', quoteId);
+            }
+          } catch (quoteError) {
+            console.error('Error creating quote:', quoteError);
+          }
+        }
+      } catch (supabaseError) {
+        console.error('Error interacting with Supabase:', supabaseError);
+      }
+      
       console.log('Sending webhook with data:', {
         phoneNumber,
         cutlistUrl,
         dimensionsCount,
-        senderName
+        senderName,
+        pricingFound: pricingData.length > 0,
+        quoteCreated: !!quoteId
       });
       
       // Try four different webhook payload formats
@@ -115,10 +191,15 @@ export const webhookDirectController = {
         // Format 1: Standard webhook format with recipient field
         const format1 = {
           recipient: phoneNumber,
-          message: `Your cutting list is ready! View it here: ${cutlistUrl}`,
+          message: quoteId ? 
+            `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+            `Your cutting list is ready! View it here: ${cutlistUrl}`,
           customer_name: senderName,
           dimensions_count: dimensionsCount,
-          url: cutlistUrl
+          url: cutlistUrl,
+          quote_id: quoteId || undefined,
+          quote_url: quoteUrl || undefined,
+          pricing_found: pricingData.length > 0
         };
         
         console.log('Trying format 1...');
@@ -144,10 +225,15 @@ export const webhookDirectController = {
           // Format 2: phone_number field instead of recipient
           const format2 = {
             phone_number: phoneNumber,
-            message: `Your cutting list is ready! View it here: ${cutlistUrl}`,
+            message: quoteId ? 
+              `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+              `Your cutting list is ready! View it here: ${cutlistUrl}`,
             customer_name: senderName,
             dimensions_count: dimensionsCount,
-            url: cutlistUrl
+            url: cutlistUrl,
+            quote_id: quoteId || undefined,
+            quote_url: quoteUrl || undefined,
+            pricing_found: pricingData.length > 0
           };
           
           const response2 = await axios.post(WEBHOOK_URL, format2, {
@@ -172,8 +258,13 @@ export const webhookDirectController = {
             // Format 3: Using query parameters
             const params = new URLSearchParams({
               phone: phoneNumber.replace(/[^0-9]/g, ''),
-              message: `Your cutting list is ready! View it here: ${cutlistUrl}`,
-              name: senderName
+              message: quoteId ? 
+                `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+                `Your cutting list is ready! View it here: ${cutlistUrl}`,
+              name: senderName,
+              quote_id: quoteId || '',
+              quote_url: quoteUrl || '',
+              pricing_found: pricingData.length > 0 ? 'true' : 'false'
             });
             
             const response3 = await axios.get(`${WEBHOOK_URL}?${params.toString()}`, {
@@ -197,8 +288,13 @@ export const webhookDirectController = {
               // Format 4: Simplified JSON
               const format4 = {
                 to: phoneNumber,
-                body: `Your cutting list is ready! View it here: ${cutlistUrl}`,
-                from: "Freecut"
+                body: quoteId ? 
+                  `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` : 
+                  `Your cutting list is ready! View it here: ${cutlistUrl}`,
+                from: "Freecut",
+                quote_id: quoteId || undefined,
+                quote_url: quoteUrl || undefined,
+                pricing_found: pricingData.length > 0
               };
               
               const response4 = await axios.post(WEBHOOK_URL, format4, {
