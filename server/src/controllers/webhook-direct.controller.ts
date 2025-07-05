@@ -18,11 +18,14 @@ export const webhookDirectController = {
       console.log('==== WEBHOOK DIRECT TEST ====');
       console.log('Testing webhook with direct payload to URL:', WEBHOOK_URL);
       
-      // Send a very simple test payload
+      // Send a WhatsApp API compliant payload
       const response = await axios.post(WEBHOOK_URL, {
-        recipient: '+27822222222', // Use a test phone number
-        message: 'Test message from Freecut API to Botsailor webhook',
-        timestamp: new Date().toISOString()
+        messaging_product: 'whatsapp',
+        to: '+27822222222', // Use a test phone number with + prefix
+        type: 'text',
+        text: {
+          body: 'Test message from Freecut API to Botsailor webhook'
+        }
       }, {
         headers: {
           'Content-Type': 'application/json'
@@ -86,6 +89,12 @@ export const webhookDirectController = {
         ocrText = req.body.ocrText;
         phoneNumber = req.body.phoneNumber || '+27822222222';
         senderName = req.body.senderName || 'Test User';
+      }
+      
+      // Ensure phone number starts with + for international format
+      if (phoneNumber && !phoneNumber.startsWith('+')) {
+        phoneNumber = '+' + phoneNumber;
+        console.log(`Added + prefix to phone number: ${phoneNumber}`);
       }
       
       // Use a test phone number if the one provided is a placeholder
