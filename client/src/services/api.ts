@@ -107,4 +107,36 @@ export const sendWhatsAppConfirmation = async (
   return response.data;
 };
 
+// Material options endpoint
+export const getMaterialOptions = async (): Promise<any> => {
+  const response = await api.get('/supabase/materials/options');
+  return response.data;
+};
+
+// Product pricing endpoint
+export const getProductPricing = async (materialName: string): Promise<any> => {
+  try {
+    // First try exact match, include the sizes column in the response
+    const response = await api.get(`/supabase/products/pricing?description=${encodeURIComponent(materialName)}&includeSizes=true`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching product pricing:', error);
+    return { success: false, error: 'Failed to get product pricing' };
+  }
+};
+
+// Get all product descriptions from the database
+export const getAllProductDescriptions = async (): Promise<string[]> => {
+  try {
+    const response = await api.get('/supabase/products/descriptions');
+    if (response.data.success && Array.isArray(response.data.data)) {
+      return response.data.data.map((product: any) => product.description);
+    }
+    return [];
+  } catch (error) {
+    console.error('Error fetching product descriptions:', error);
+    return [];
+  }
+};
+
 export default api;

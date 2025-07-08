@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.webhookDirectController = void 0;
 const axios_1 = __importDefault(require("axios"));
+const supabase_service_1 = __importDefault(require("../services/supabase.service"));
 // Hard-coded webhook URL for direct testing
 const WEBHOOK_URL = 'https://www.botsailor.com/webhook/whatsapp-workflow/145613.157394.183999.1748553417';
 /**
@@ -29,12 +30,16 @@ exports.webhookDirectController = {
             try {
                 console.log('==== WEBHOOK DIRECT TEST ====');
                 console.log('Testing webhook with direct payload to URL:', WEBHOOK_URL);
-                // Send a very simple test payload
-                const response = yield axios_1.default.post(WEBHOOK_URL, {
-                    recipient: '+27822222222', // Use a test phone number
-                    message: 'Test message from Freecut API to Botsailor webhook',
-                    timestamp: new Date().toISOString()
-                }, {
+                // Send the exact WhatsApp API format required by Botsailor
+                const testPayload = {
+                    to: '+27822222222', // Use a test phone number with + prefix
+                    type: 'text',
+                    text: {
+                        body: 'Test message from Freecut API to Botsailor webhook'
+                    }
+                };
+                console.log('Sending test webhook with exact format:', testPayload);
+                const response = yield axios_1.default.post(WEBHOOK_URL, testPayload, {
                     headers: {
                         'Content-Type': 'application/json'
                     },
@@ -71,6 +76,7 @@ exports.webhookDirectController = {
      */
     processN8n(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b;
             try {
                 console.log('==== DIRECT N8N PROCESSING ====');
                 console.log('Request body:', JSON.stringify(req.body, null, 2));
@@ -97,6 +103,18 @@ exports.webhookDirectController = {
                     phoneNumber = req.body.phoneNumber || '+27822222222';
                     senderName = req.body.senderName || 'Test User';
                 }
+                // Sanitize phone number
+                if (phoneNumber) {
+                    // Remove any trailing newline characters
+                    phoneNumber = phoneNumber.replace(/\r?\n/g, '');
+                    // Ensure phone number starts with + for international format
+                    if (!phoneNumber.startsWith('+')) {
+                        phoneNumber = '+' + phoneNumber;
+                    }
+                    // Trim any whitespace
+                    phoneNumber = phoneNumber.trim();
+                    console.log(`Sanitized phone number: ${phoneNumber}`);
+                }
                 // Use a test phone number if the one provided is a placeholder
                 if (phoneNumber === 'your_phone_number') {
                     phoneNumber = '+27822222222';
@@ -104,132 +122,201 @@ exports.webhookDirectController = {
                 // Generate a unique ID for this cutlist
                 const uniqueId = new Date().getTime().toString();
                 const baseUrl = process.env.BASE_URL || 'https://hds-sifosmans-projects.vercel.app';
-                // Use the cutlist-edit URL with the unique ID
-                const cutlistUrl = `${baseUrl}/cutlist-edit/${uniqueId}`;
                 // Simple way to extract dimensions count
                 const dimensionsCount = ocrText ?
                     ocrText.split('\n').filter((line) => /\d+\s*[xX]\s*\d+/.test(line)).length : 0;
+                // Extract potential cut pieces from OCR text
+                const cutPieces = [];
+                if (ocrText) {
+                    const lines = ocrText.split('\n');
+                    for (const line of lines) {
+                        // Check if line contains dimensions (e.g., 800 x 400)
+                        if (/\d+\s*[xX]\s*\d+/.test(line)) {
+                            const match = line.match(/(\d+)\s*[xX]\s*(\d+)/);
+                            if (match) {
+                                const [_, length, width] = match;
+                                cutPieces.push({
+                                    length: parseInt(length),
+                                    width: parseInt(width),
+                                    quantity: 1,
+                                    description: line
+                                });
+                            }
+                        }
+                    }
+                }
+                // Save cutlist data to Supabase
+                const cutlistData = {
+                    id: uniqueId,
+                    customerName: senderName,
+                    phoneNumber: phoneNumber,
+                    ocrText: ocrText,
+                    cutPieces: cutPieces,
+                    unit: 'mm' // Default unit
+                };
+                // First check if Supabase is connected
+                console.log('Checking Supabase connection...');
+                const connectionResult = yield supabase_service_1.default.checkConnection();
+                if (!connectionResult) {
+                    console.error('Supabase connection check failed');
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Failed to connect to database',
+                        error: 'Supabase connection error'
+                    });
+                }
+                console.log('Supabase connection OK, attempting to save cutlist:', JSON.stringify(cutlistData, null, 2));
+                // Try to save cutlist to Supabase with detailed error logging
+                try {
+                    const saveResult = yield supabase_service_1.default.saveCutlist(cutlistData);
+                    if (!saveResult.success) {
+                        console.error('Failed to save cutlist - explicit error:', saveResult.error);
+                        return res.status(500).json({
+                            success: false,
+                            message: 'Failed to save cutlist data',
+                            error: saveResult.error || 'Unknown database error'
+                        });
+                    }
+                }
+                catch (error) {
+                    console.error('Exception during cutlist save operation:', error);
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Exception occurred while saving cutlist data',
+                        error: (error === null || error === void 0 ? void 0 : error.message) || 'Unknown error'
+                    });
+                }
+                console.log('Cutlist saved successfully with ID:', uniqueId);
+                // Use the cutlist-edit URL with the unique ID
+                const cutlistUrl = `${baseUrl}/cutlist-edit/${uniqueId}`;
+                // Extract potential product codes from OCR text
+                // This is a simplified example - in production you'd need proper parsing based on your specific format
+                const productCodesRegex = /(?:product|item)\s*(?:code|id)?[:\s]*(\w+)/gi;
+                const productCodes = [];
+                let match;
+                while ((match = productCodesRegex.exec(ocrText)) !== null) {
+                    productCodes.push(match[1]);
+                }
+                // If no product codes found from regex, use some default test codes
+                if (productCodes.length === 0) {
+                    // Add some sample product codes for testing
+                    productCodes.push('BOARD001');
+                    productCodes.push('EDGE002');
+                }
+                console.log('Extracted product codes:', productCodes);
+                // Attempt to get pricing from Supabase
+                let pricingData = [];
+                let quoteUrl = '';
+                let quoteId = '';
+                try {
+                    // Get pricing for each product code
+                    for (const code of productCodes) {
+                        try {
+                            const pricing = yield supabase_service_1.default.getProductPricing(code);
+                            if (pricing && pricing.success) {
+                                pricingData.push({
+                                    productCode: code,
+                                    price: pricing.data, // This would need parsing based on the actual response structure
+                                });
+                            }
+                        }
+                        catch (pricingError) {
+                            console.error(`Error getting pricing for product ${code}:`, pricingError);
+                        }
+                    }
+                    // If pricing data was successfully retrieved, create a quote
+                    if (pricingData.length > 0) {
+                        try {
+                            // Sample quote creation - in production, you'd construct this from the actual data
+                            const quoteData = {
+                                customerName: senderName,
+                                customerEmail: req.body.email || 'customer@example.com',
+                                customerTelephone: phoneNumber,
+                                cutlistUrl: cutlistUrl,
+                                items: pricingData.map(item => {
+                                    var _a, _b;
+                                    return ({
+                                        stockCode: item.price.productCode,
+                                        description: item.price.description || `Product ${item.productCode}`,
+                                        quantity: 1,
+                                        priceExclusive: ((_a = item.price) === null || _a === void 0 ? void 0 : _a.price) || 100, // Default price if not found
+                                        lineTotal: ((_b = item.price) === null || _b === void 0 ? void 0 : _b.price) || 100,
+                                    });
+                                }),
+                                total: pricingData.reduce((sum, item) => { var _a; return sum + (((_a = item.price) === null || _a === void 0 ? void 0 : _a.price) || 100); }, 0),
+                            };
+                            const quoteResult = yield supabase_service_1.default.createQuote(quoteData);
+                            if (quoteResult && quoteResult.success) {
+                                quoteId = ((_a = quoteResult.data) === null || _a === void 0 ? void 0 : _a.quoteNumber) || 'Q' + uniqueId;
+                                quoteUrl = `${baseUrl}/quote/${quoteId}`;
+                                console.log('Quote created successfully:', quoteId);
+                            }
+                        }
+                        catch (quoteError) {
+                            console.error('Error creating quote:', quoteError);
+                        }
+                    }
+                }
+                catch (supabaseError) {
+                    console.error('Error interacting with Supabase:', supabaseError);
+                }
                 console.log('Sending webhook with data:', {
                     phoneNumber,
                     cutlistUrl,
                     dimensionsCount,
-                    senderName
+                    senderName,
+                    pricingFound: pricingData.length > 0,
+                    quoteCreated: !!quoteId
                 });
-                // Try four different webhook payload formats
+                // Use only the exact WhatsApp API format required by Botsailor
                 try {
-                    // Format 1: Standard webhook format with recipient field
-                    const format1 = {
-                        recipient: phoneNumber,
-                        message: `Your cutting list is ready! View it here: ${cutlistUrl}`,
-                        customer_name: senderName,
-                        dimensions_count: dimensionsCount,
-                        url: cutlistUrl
+                    // Create the message body
+                    const messageBody = quoteId ?
+                        `Your cutting list and quote #${quoteId} are ready! View your cutting list here: ${cutlistUrl}` :
+                        `Your cutting list is ready! View it here: ${cutlistUrl}`;
+                    // Exact format as specified by WhatsApp API
+                    const payload = {
+                        to: phoneNumber,
+                        type: 'text',
+                        text: {
+                            body: messageBody
+                        }
                     };
-                    console.log('Trying format 1...');
-                    const response1 = yield axios_1.default.post(WEBHOOK_URL, format1, {
+                    console.log('WEBHOOK DEBUG: Sending with exact WhatsApp API format:', payload);
+                    const response = yield axios_1.default.post(WEBHOOK_URL, payload, {
                         headers: { 'Content-Type': 'application/json' },
                         timeout: 10000
                     });
-                    console.log('Format 1 succeeded!', response1.status);
+                    console.log('Webhook sent successfully:', response.status);
                     return res.status(200).json({
                         success: true,
-                        message: 'Webhook sent successfully using format 1',
-                        format: format1,
+                        message: 'Webhook sent successfully',
+                        payload: payload,
                         response: {
-                            status: response1.status,
-                            data: response1.data
+                            status: response.status,
+                            data: response.data
+                        },
+                        additionalData: {
+                            quoteId: quoteId || null,
+                            quoteUrl: quoteUrl || null,
+                            customerName: senderName,
+                            dimensionsCount: dimensionsCount,
+                            pricingFound: pricingData.length > 0
                         }
                     });
                 }
-                catch (error1) {
-                    console.log('Format 1 failed, trying format 2...');
-                    try {
-                        // Format 2: phone_number field instead of recipient
-                        const format2 = {
-                            phone_number: phoneNumber,
-                            message: `Your cutting list is ready! View it here: ${cutlistUrl}`,
-                            customer_name: senderName,
-                            dimensions_count: dimensionsCount,
-                            url: cutlistUrl
-                        };
-                        const response2 = yield axios_1.default.post(WEBHOOK_URL, format2, {
-                            headers: { 'Content-Type': 'application/json' },
-                            timeout: 10000
-                        });
-                        console.log('Format 2 succeeded!', response2.status);
-                        return res.status(200).json({
-                            success: true,
-                            message: 'Webhook sent successfully using format 2',
-                            format: format2,
-                            response: {
-                                status: response2.status,
-                                data: response2.data
-                            }
-                        });
+                catch (error) {
+                    console.error('Webhook sending failed:', error.message);
+                    if (error.response) {
+                        console.error('Response status:', error.response.status);
+                        console.error('Response data:', error.response.data);
                     }
-                    catch (error2) {
-                        console.log('Format 2 failed, trying format 3...');
-                        try {
-                            // Format 3: Using query parameters
-                            const params = new URLSearchParams({
-                                phone: phoneNumber.replace(/[^0-9]/g, ''),
-                                message: `Your cutting list is ready! View it here: ${cutlistUrl}`,
-                                name: senderName
-                            });
-                            const response3 = yield axios_1.default.get(`${WEBHOOK_URL}?${params.toString()}`, {
-                                timeout: 10000
-                            });
-                            console.log('Format 3 succeeded!', response3.status);
-                            return res.status(200).json({
-                                success: true,
-                                message: 'Webhook sent successfully using format 3 (GET)',
-                                format: { url: `${WEBHOOK_URL}?${params.toString()}` },
-                                response: {
-                                    status: response3.status,
-                                    data: response3.data
-                                }
-                            });
-                        }
-                        catch (error3) {
-                            console.log('Format 3 failed, trying format 4...');
-                            try {
-                                // Format 4: Simplified JSON
-                                const format4 = {
-                                    to: phoneNumber,
-                                    body: `Your cutting list is ready! View it here: ${cutlistUrl}`,
-                                    from: "Freecut"
-                                };
-                                const response4 = yield axios_1.default.post(WEBHOOK_URL, format4, {
-                                    headers: { 'Content-Type': 'application/json' },
-                                    timeout: 10000
-                                });
-                                console.log('Format 4 succeeded!', response4.status);
-                                return res.status(200).json({
-                                    success: true,
-                                    message: 'Webhook sent successfully using format 4',
-                                    format: format4,
-                                    response: {
-                                        status: response4.status,
-                                        data: response4.data
-                                    }
-                                });
-                            }
-                            catch (error4) {
-                                // All formats failed
-                                console.error('All webhook formats failed');
-                                return res.status(500).json({
-                                    success: false,
-                                    message: 'All webhook formats failed',
-                                    errors: {
-                                        format1: error1.message,
-                                        format2: error2.message,
-                                        format3: error3.message,
-                                        format4: error4.message
-                                    }
-                                });
-                            }
-                        }
-                    }
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Webhook sending failed',
+                        error: error.message,
+                        errorResponse: (_b = error.response) === null || _b === void 0 ? void 0 : _b.data
+                    });
                 }
             }
             catch (error) {

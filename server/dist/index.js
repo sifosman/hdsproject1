@@ -21,11 +21,13 @@ const webhook_direct_controller_1 = require("./controllers/webhook-direct.contro
 const optimizer_routes_1 = __importDefault(require("./routes/optimizer.routes"));
 const project_routes_1 = __importDefault(require("./routes/project.routes"));
 const botsailor_routes_1 = __importDefault(require("./routes/botsailor.routes"));
+const iqretail_routes_1 = __importDefault(require("./routes/iqretail.routes"));
 const ocr_routes_1 = __importDefault(require("./routes/ocr.routes"));
 const cutlist_routes_1 = __importDefault(require("./routes/cutlist.routes"));
 const n8n_routes_1 = __importDefault(require("./routes/n8n.routes"));
 const webhook_direct_routes_1 = __importDefault(require("./routes/webhook-direct.routes"));
 const debug_routes_1 = __importDefault(require("./routes/debug.routes"));
+const supabase_routes_1 = __importDefault(require("./routes/supabase.routes"));
 // Load environment variables
 dotenv_1.default.config();
 // Create Express app
@@ -51,6 +53,8 @@ app.use('/api/cutlist', cutlist_routes_1.default);
 app.use('/api/n8n', n8n_routes_1.default);
 app.use('/api/webhook', webhook_direct_routes_1.default);
 app.use('/api/debug', debug_routes_1.default);
+app.use('/api/iqretail', iqretail_routes_1.default);
+app.use('/api/supabase', supabase_routes_1.default);
 // Direct test endpoint for n8n integration
 app.get('/api/direct-test', (req, res) => {
     res.status(200).json({

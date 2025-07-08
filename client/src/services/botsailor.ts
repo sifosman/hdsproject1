@@ -49,6 +49,14 @@ export const getStockPieces = async (materialId: string): Promise<any> => {
 };
 
 /**
+ * Send a WhatsApp message through Botsailor
+ */
+export const sendWhatsAppMessage = async ({ to, message, pdfUrl }: { to: string, message: string, pdfUrl?: string }): Promise<any> => {
+  const response = await api.post('/botsailor/whatsapp/send', { to, message, pdfUrl });
+  return response.data;
+};
+
+/**
  * Process a cutting list image with OCR
  * @param imageFile The image file to process
  * @param phoneNumber Optional phone number for WhatsApp confirmation

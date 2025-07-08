@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { renderTemplate } from '../services/template.service';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import SupabaseService from '../services/supabase.service';
 
 // Load environment variables
 dotenv.config();
@@ -117,44 +118,73 @@ const getCutlistData = async (req: Request, res: Response) => {
   try {
     const cutlistId = req.params.id;
     
-    if (!mongoose.Types.ObjectId.isValid(cutlistId)) {
-      return res.status(400).json({ success: false, message: 'Invalid cutting list ID' });
+    console.log(`Getting cutlist data for ID: ${cutlistId}`);
+    
+    // First try to fetch from Supabase (new storage system)
+    const supabaseResult = await SupabaseService.getCutlistById(cutlistId);
+    
+    if (supabaseResult && supabaseResult.success) {
+      console.log('Cutlist found in Supabase');
+      return res.json({
+        success: true,
+        message: 'Cutlist data retrieved successfully',
+        cutlist: supabaseResult.data
+      });
     }
     
-    const cutlist = await Cutlist.findById(cutlistId);
+    console.log('Cutlist not found in Supabase, trying MongoDB');
     
-    if (!cutlist) {
-      return res.status(404).json({ success: false, message: 'Cutting list not found' });
+    // If not found in Supabase, try to fetch from MongoDB (legacy storage)
+    if (mongoose.Types.ObjectId.isValid(cutlistId)) {
+      const cutlist = await Cutlist.findById(cutlistId);
+      
+      if (!cutlist) {
+        return res.status(404).json({
+          success: false,
+          message: 'Cutting list not found in any database'
+        });
+      }
+      
+      console.log('Original cutlist from MongoDB:', JSON.stringify(cutlist, null, 2));
+      console.log('Original dimensions:', JSON.stringify(cutlist.dimensions, null, 2));
+      
+      // Create a modified response with dimensions mapped to cutPieces for frontend compatibility
+      const responseData = {
+        ...cutlist.toObject(),
+        cutPieces: cutlist.dimensions || [] // Map dimensions to cutPieces for frontend
+      };
+      
+      // Log the structure after mapping to verify cutPieces is present
+      console.log('Response data structure:');
+      console.log('- cutPieces exists:', !!responseData.cutPieces);
+      console.log('- cutPieces is array:', Array.isArray(responseData.cutPieces));
+      console.log('- cutPieces length:', responseData.cutPieces?.length || 0);
+      console.log('- dimensions exists:', !!responseData.dimensions); 
+      console.log('- stockPieces exists:', !!responseData.stockPieces);
+      console.log('- materials exists:', !!responseData.materials);
+      
+      console.log('Full response data being sent:', JSON.stringify(responseData, null, 2));
+      
+      return res.json({
+        success: true,
+        message: 'Cutting list data retrieved successfully from MongoDB',
+        cutlist: responseData
+      });
     }
     
-    console.log('Original cutlist from database:', JSON.stringify(cutlist, null, 2));
-    console.log('Original dimensions:', JSON.stringify(cutlist.dimensions, null, 2));
-    
-    // Create a modified response with dimensions mapped to cutPieces for frontend compatibility
-    const responseData = {
-      ...cutlist.toObject(),
-      cutPieces: cutlist.dimensions || [] // Map dimensions to cutPieces for frontend
-    };
-    
-    // Log the structure after mapping to verify cutPieces is present
-    console.log('Response data structure:');
-    console.log('- cutPieces exists:', !!responseData.cutPieces);
-    console.log('- cutPieces is array:', Array.isArray(responseData.cutPieces));
-    console.log('- cutPieces length:', responseData.cutPieces?.length || 0);
-    console.log('- dimensions exists:', !!responseData.dimensions); 
-    console.log('- stockPieces exists:', !!responseData.stockPieces);
-    console.log('- materials exists:', !!responseData.materials);
-    
-    console.log('Full response data being sent:', JSON.stringify(responseData, null, 2));
-    
-    res.json({
-      success: true,
-      cutlist: responseData
+    // If we reach here, the cutlist ID is not valid for MongoDB and not found in Supabase
+    return res.status(400).json({
+      success: false, 
+      message: 'Invalid cutlist ID format or cutlist not found'
     });
     
   } catch (error) {
-    console.error('Error getting cutlist data:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Error retrieving cutting list data:', error);
+    res.status(500).json({
+      success: false, 
+      message: 'Server error',
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 };
 
@@ -165,11 +195,11 @@ const getAllCutlists = async (req: Request, res: Response) => {
     
     res.json({
       success: true,
+      message: 'Cutlists retrieved successfully',
       cutlists
     });
-    
   } catch (error) {
-    console.error('Error getting all cutlists:', error);
+    console.error('Error retrieving all cutlists:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };

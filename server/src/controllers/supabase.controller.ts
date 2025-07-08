@@ -222,6 +222,42 @@ const supabaseController = {
       console.error('Error processing payment:', error);
       return res.status(500).json({ success: false, message: error.message });
     }
+  },
+  
+  /**
+   * Get material options for cascading dropdowns
+   */
+  async getMaterialOptions(req: Request, res: Response) {
+    try {
+      const result = await SupabaseService.getMaterialOptions();
+      
+      if (!result.success) {
+        return res.status(404).json({ success: false, message: result.error || 'Material options not found' });
+      }
+      
+      return res.status(200).json({ success: true, data: result.data });
+    } catch (error: any) {
+      console.error('Error fetching material options:', error);
+      return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    }
+  },
+  
+  /**
+   * Get all product descriptions
+   */
+  async getProductDescriptions(req: Request, res: Response) {
+    try {
+      const result = await SupabaseService.getProductDescriptions();
+      
+      if (!result.success) {
+        return res.status(404).json({ success: false, message: result.error || 'Product descriptions not found' });
+      }
+      
+      return res.status(200).json({ success: true, data: result.data });
+    } catch (error: any) {
+      console.error('Error fetching product descriptions:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
   }
 };
 

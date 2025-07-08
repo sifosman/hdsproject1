@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { getMaterialOptions } from '../services/api';
+import { getMaterialOptions, optimizeCutting, getPdfUrl, getProductPricing, getAllProductDescriptions } from '../services/api';
+import * as botsailorService from '../services/botsailor';
 import {
   Box,
   Button,
@@ -26,7 +27,9 @@ import {
   Snackbar,
   Alert,
   useTheme,
-  Grid
+  Grid,
+  Checkbox,
+  FormControlLabel
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -118,13 +121,16 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   const [projectName, setProjectName] = useState<string>(initialData?.projectName || '');
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [whatsappDialogOpen, setWhatsappDialogOpen] = useState<boolean>(false);
+  const [message, setMessage] = useState<string>('');
   const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
   const [snackbarMessage, setSnackbarMessage] = useState<string>('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
   
   // Material options from API
   const [materialData, setMaterialData] = useState<any>(DEFAULT_MATERIAL_DATA);
-  const [materialCategories, setMaterialCategories] = useState<string[]>(DEFAULT_MATERIAL_CATEGORIES);
+  const [materialCategories, setMaterialCategories] = useState<string[]>([]);
+  const [productDescriptions, setProductDescriptions] = useState<string[]>([]);
+  const [materialDescriptions, setMaterialDescriptions] = useState<Record<string, string[]>>({});
   const [loadingMaterials, setLoadingMaterials] = useState<boolean>(true);
   
   // State for managing material selections for each section
@@ -133,6 +139,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     colorFamily?: string;
     decorPattern?: string;
     surfacePattern?: string;
+    materialDescription?: string;
   }
 
   const [sectionMaterials, setSectionMaterials] = useState<Record<number, SectionMaterial>>({});
@@ -277,120 +284,112 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   
   // Fetch material options from API on component mount
   useEffect(() => {
-    fetchMaterialOptions();
-  }, []);
-  
-  async function fetchMaterialOptions() {
-    setLoadingMaterials(true);
-    try {
-      // Call API to get material options
-      const options = await getMaterialOptions();
-      
-      if (options && options.categories && options.materialData) {
-        setMaterialData(options.materialData);
-        setMaterialCategories(options.categories);
-        console.log('Material data loaded from API:', options.materialData);
-        
-        // Initialize section materials with defaults for existing sections
-        const initialSections: Record<number, SectionMaterial> = {};
-        cutPieces.forEach((piece, idx) => {
-          if (piece.separator) {
-            const materialName = piece.name || '';
-            let category = '';
-            
-            // Determine the category from the piece name
-            for (const heading of materialHeadings) {
-              if (materialName.toLowerCase().includes(heading.key)) {
-                category = heading.value;
-                break;
-              }
-            }
-            
-            if (category && options.materialData[category]) {
-              const colorFamilies = Object.keys(options.materialData[category]);
-              if (colorFamilies.length > 0) {
-                // Default to White for White Melamine/Messonite, otherwise first color
-                const defaultColor = (category === "White Melamine" || category === "White Messonite") ? 
-                  "White" : colorFamilies[0];
-                  
-                const decorPatterns = Object.keys(options.materialData[category][defaultColor]);
-                if (decorPatterns.length > 0) {
-                  initialSections[idx] = {
-                    category,
-                    colorFamily: defaultColor,
-                    decorPattern: decorPatterns[0],
-                    surfacePattern: options.materialData[category][defaultColor][decorPatterns[0]][0]
-                  };
-                }
-              }
-            }
-          }
-        });
-        
-        setSectionMaterials(initialSections);
-      } else {
-        console.warn('API returned incomplete material data, using defaults');
-        // Use defaults as fallback
-        setMaterialData(DEFAULT_MATERIAL_DATA);
+    async function fetchOptions() {
+      setLoadingMaterials(true);
+      try {
+        const [optionsResult, descriptions] = await Promise.all([
+          getMaterialOptions(),
+          getAllProductDescriptions(),
+        ]);
+
+        if (optionsResult.success && optionsResult.options) {
+          setMaterialData(optionsResult.options);
+          setMaterialCategories(Object.keys(optionsResult.options));
+        } else {
+          console.error('Failed to get material options:', optionsResult.error);
+          setMaterialData(DEFAULT_MATERIAL_DATA); // fallback
+          setMaterialCategories(DEFAULT_MATERIAL_CATEGORIES);
+        }
+
+        setProductDescriptions(descriptions);
+
+      } catch (error) {
+        console.error('Error fetching material data:', error);
+        setMaterialData(DEFAULT_MATERIAL_DATA); // fallback
         setMaterialCategories(DEFAULT_MATERIAL_CATEGORIES);
+      } finally {
+        setLoadingMaterials(false);
       }
-    } catch (error) {
-      console.error('Error fetching material options:', error);
-      // Fall back to default options
-      setMaterialData(DEFAULT_MATERIAL_DATA);
-      setMaterialCategories(DEFAULT_MATERIAL_CATEGORIES);
-    } finally {
-      setLoadingMaterials(false);
     }
-  }
+    fetchOptions();
+  }, []);
 
   useEffect(() => {
     if (initialData) {
-      setCutPieces(normalizeCutPieces(initialData.cutPieces || []));
-      setStockPieces(initialData.stockPieces);
-      setMaterials(initialData.materials);
+      const normalized = normalizeCutPieces(initialData.cutPieces || []);
+      setCutPieces(normalized);
+      setStockPieces(initialData.stockPieces || []);
+      setMaterials(initialData.materials || []);
       setUnit(initialData.unit || 'mm');
       setCustomerName(initialData.customerName || '');
       setProjectName(initialData.projectName || '');
     }
   }, [initialData]);
 
-  // const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-  //   setTabValue(newValue);
-  // }; // Removed as tabs are simplified
-
-  // const handleStockPieceChange = (id: string, field: keyof StockPiece, value: any) => {
-  //   setData(prevData => ({
-  //     ...prevData,
-  //     stockPieces: prevData.stockPieces.map(piece => 
-  //       piece.id === id ? { ...piece, [field]: field === 'quantity' ? parseInt(value) : parseFloat(value) } : piece
-  //     )
-  //   }));
-  // }; // Stock pieces removed
-
   const handleCutPieceChange = (id: string, field: keyof CutPiece, value: any) => {
-    setCutPieces(prevCutPieces => prevCutPieces.map(piece => 
-      piece.id === id ? { 
-        ...piece, 
-        [field]: field === 'quantity' ? parseInt(value) : field === 'name' ? value : parseFloat(value) 
-      } : piece
-    ));
+    setCutPieces(prevCutPieces =>
+      prevCutPieces.map(piece =>
+        piece.id === id ? { ...piece, [field]: value } : piece
+      )
+    );
   };
 
-  const handleAddCutPiece = () => {
-    const newId = `cp-${Date.now()}`;
+  const handleAddMaterialSection = () => {
+    const newId = `separator-${Date.now()}`;
     setCutPieces(prevCutPieces => [
       ...prevCutPieces,
       {
         id: newId,
-        width: 500,
-        length: 500,
-        quantity: 1,
-        name: `Cut Piece ${prevCutPieces.length + 1}`,
-        edging: 1,
-        material: materialCategories[0],
-      }
+        separator: true,
+        name: materialCategories[0] || 'New Material',
+      },
     ]);
+  };
+
+  const handleAddCutPiece = (materialName?: string) => {
+    const newId = `cp-${Date.now()}`;
+    let targetMaterial = materialName;
+
+    if (!targetMaterial) {
+      // Find the last material section to add the piece to
+      const lastSeparator = [...cutPieces].reverse().find(p => p.separator);
+      targetMaterial = lastSeparator?.name || materialCategories[0] || 'New Material';
+    }
+    
+    const newPiece: CutPiece = {
+      id: newId,
+      width: 500,
+      length: 500,
+      quantity: 1,
+      name: 'New Piece',
+      edging: 1,
+      material: targetMaterial,
+      lengthTick1: false,
+      lengthTick2: false,
+      widthTick1: false,
+      widthTick2: false,
+      separator: false,
+    };
+
+    // Find the correct index to insert the new piece
+    let insertAtIndex = cutPieces.length;
+    if (targetMaterial) {
+        // Find the last piece of the same material
+        const lastPieceInMaterialSectionIndex = cutPieces.map(p => p.material).lastIndexOf(targetMaterial);
+        if (lastPieceInMaterialSectionIndex !== -1) {
+            insertAtIndex = lastPieceInMaterialSectionIndex + 1;
+        } else {
+            // If no pieces of this material, find the separator and insert after it
+            const separatorIndex = cutPieces.findIndex(p => p.separator && p.name === targetMaterial);
+            if (separatorIndex !== -1) {
+                insertAtIndex = separatorIndex + 1;
+            }
+        }
+    }
+
+    const updatedCutPieces = [...cutPieces];
+    updatedCutPieces.splice(insertAtIndex, 0, newPiece);
+    setCutPieces(updatedCutPieces);
   };
 
   const handleDeleteCutPiece = (id: string) => {
@@ -398,17 +397,8 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   };
 
   const handleSave = () => {
-    // Validate data
-    if (cutPieces.length === 0) {
-      setSnackbarMessage('You need at least one cut piece');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-      return;
-    }
-    // Require both Length tick boxes for each cut piece (not separator)
-    const invalidPiece = cutPieces.find(p => !p.separator && (!p.lengthTick1 || !p.lengthTick2));
-    if (invalidPiece) {
-      setSnackbarMessage('Please select both Length tick boxes for each cut piece.');
+    if (cutPieces.some(p => !p.separator && (!p.length || !p.width || !p.quantity))) {
+      setSnackbarMessage('Please fill in all dimensions and quantity for each piece.');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
       return;
@@ -419,665 +409,438 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       materials,
       unit,
       customerName,
-      projectName
+      projectName,
     });
-    setSnackbarMessage('Cutlist saved successfully');
+    setSnackbarMessage('Cutlist saved successfully!');
     setSnackbarSeverity('success');
     setSnackbarOpen(true);
   };
 
-  const handleOpenWhatsAppDialog = () => {
-    setWhatsappDialogOpen(true);
+  const handleOpenWhatsAppDialog = () => setWhatsappDialogOpen(true);
+  const handleCloseWhatsAppDialog = () => setWhatsappDialogOpen(false);
+
+  const handleSendWhatsApp = async () => {
+    if (!onSendWhatsApp) return;
+
+    if (!phoneNumber || !customerName) {
+        setSnackbarMessage('Phone number and customer name are required.');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        return;
+    }
+
+    const dataToSend = { stockPieces, cutPieces, materials, unit, customerName, projectName };
+    
+    try {
+        await onSendWhatsApp(phoneNumber, dataToSend, customerName, projectName);
+        setSnackbarMessage('WhatsApp message sent successfully!');
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+        handleCloseWhatsAppDialog();
+    } catch (error) {
+        console.error('Error sending WhatsApp message:', error);
+        setSnackbarMessage('Failed to send WhatsApp message.');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+    }
   };
 
-  const handleCloseWhatsAppDialog = () => {
-    setWhatsappDialogOpen(false);
+  // Function to extract dimensions from product data
+  const extractDimensions = (productData: any): { width: number; length: number; thickness: number } => {
+    // Default values
+    const defaultDimensions = { width: 2750, length: 1830, thickness: 16 };
+    
+    try {
+      if (!productData) return defaultDimensions;
+      
+      // First priority: check if sizes field exists with format "LxWxT"
+      if (productData.sizes && typeof productData.sizes === 'string') {
+        const sizesParts = productData.sizes.split('x');
+        if (sizesParts.length === 3) {
+          return {
+            length: parseInt(sizesParts[0], 10) || defaultDimensions.length,
+            width: parseInt(sizesParts[1], 10) || defaultDimensions.width,
+            thickness: parseInt(sizesParts[2], 10) || defaultDimensions.thickness
+          };
+        }
+      }
+      
+      // Fallback to parsing from description
+      if (productData && productData.description) {
+        const description = productData.description;
+        const dimensionPattern = /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)\s*mm/i;
+        const match = description.match(dimensionPattern);
+        
+        if (match && match.length === 4) {
+          return {
+            length: parseInt(match[1], 10) || defaultDimensions.length,
+            width: parseInt(match[2], 10) || defaultDimensions.width,
+            thickness: parseInt(match[3], 10) || defaultDimensions.thickness
+          };
+        }
+      }
+      
+      return defaultDimensions;
+    } catch (error) {
+      console.error('Error extracting dimensions:', error);
+      return defaultDimensions;
+    }
   };
 
-  const handleSendWhatsApp = () => {
-    if (!phoneNumber) {
-      setSnackbarMessage('Phone number is required');
+  // Function to send cutlist data to the calculation tool
+  const handleCalculate = async () => {
+    // Validate data
+    if (cutPieces.length === 0) {
+      setSnackbarMessage('Please add cut pieces first');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
       return;
     }
-    
-    if (onSendWhatsApp) {
-      onSendWhatsApp(phoneNumber, {
-        stockPieces,
-        cutPieces,
-        materials,
-        unit,
-        customerName,
-        projectName
-      }, customerName, projectName);
-      setSnackbarMessage('WhatsApp message sent successfully');
-      setSnackbarSeverity('success');
+
+    const invalidPiece = cutPieces.find(p => !p.separator && (!p.lengthTick1 || !p.lengthTick2));
+    if (invalidPiece) {
+      setSnackbarMessage('Please select both Length tick boxes for each cut piece.');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+
+    if (!phoneNumber) {
+      setSnackbarMessage('Please enter a phone number to receive the quotation');
+      setSnackbarSeverity('warning');
+      setSnackbarOpen(true);
+      setWhatsappDialogOpen(true);
+      return;
+    }
+
+    try {
+      setSnackbarMessage('Calculating optimal cutting plan and generating quotation...');
+      setSnackbarSeverity('info');
+      setSnackbarOpen(true);
+      
+      // Get material names from the cutlist (from separators)
+      const sections = getSections();
+      const materialNames = sections.map(section => section.material);
+      
+      // Get pricing information for each material
+      const pricingPromises = materialNames.map(materialName => 
+        getProductPricing(materialName || 'White Melamine')
+      );
+      
+      const pricingResults = await Promise.all(pricingPromises);
+      
+      // Create stock pieces based on material dimensions from description
+      const newStockPieces: StockPiece[] = [];
+      const materialPrices: Record<string, number> = {};
+      
+      pricingResults.forEach((result, index) => {
+        if (result.success && result.data) {
+          const materialName = materialNames[index] || 'White Melamine';
+          const dimensions = extractDimensions(result.data);
+          
+          // Add stock piece with the dimensions
+          newStockPieces.push({
+            id: `stock-${Date.now()}-${index}`,
+            length: dimensions.length,
+            width: dimensions.width,
+            quantity: 100, // Large quantity so optimizer can use as many as needed
+            material: materialName
+          });
+          
+          // Store price for later use
+          materialPrices[materialName] = result.data.price || 0;
+        }
+      });
+      
+      // Organize cut pieces by material
+      let quotationText = '';
+      let totalPrice = 0;
+      
+      // Process each material section
+      for (const section of sections) {
+        const materialName = section.material || 'White Melamine';
+        const materialCutPieces = cutPieces.filter(p => 
+          !p.separator && p.material === materialName
+        );
+        
+        // Skip if no cut pieces for this material
+        if (materialCutPieces.length === 0) continue;
+        
+        // Find the stock piece for this material
+        const stockPiece = newStockPieces.find(sp => sp.material === materialName);
+        if (!stockPiece) continue;
+        
+        // Prepare data for optimizer
+        const optimizerData = {
+          cutPieces: materialCutPieces.map(p => ({
+            id: p.id,
+            width: p.width || 0,
+            length: p.length || 0,
+            quantity: p.quantity || 1,
+            edging: p.edging || 0
+          })),
+          stockPieces: [stockPiece]
+        };
+        
+        // Call optimizer
+        const optimizerResult = await optimizeCutting(optimizerData);
+        
+        if (optimizerResult.success) {
+          // Calculate price for this material
+          const boardsNeeded = optimizerResult.data.boardsNeeded || 0;
+          const materialPrice = materialPrices[materialName] || 0;
+          const sectionPrice = boardsNeeded * materialPrice;
+          totalPrice += sectionPrice;
+          
+          // Build quotation text
+          quotationText += `\n*${materialName}*\n`;
+          quotationText += `- Boards needed: ${boardsNeeded}\n`;
+          quotationText += `- Price per board: R ${materialPrice.toFixed(2)}\n`;
+          quotationText += `- Section total: R ${sectionPrice.toFixed(2)}\n`;
+        }
+      }
+      
+      // Add grand total to quotation
+      quotationText = `*Quotation Summary*\n${quotationText}\n*Total Price: R ${totalPrice.toFixed(2)}*`;
+      
+      // Add customer and project info if available
+      if (customerName) {
+        quotationText = `Customer: ${customerName}\n${quotationText}`;
+      }
+      
+      if (projectName) {
+        quotationText = `Project: ${projectName}\n${quotationText}`;
+      }
+      
+      // Generate PDF
+      const pdfResult = await getPdfUrl({ content: quotationText, title: `Cutlist Quotation ${projectName || ''}` });
+      let pdfUrl = '';
+      
+      if (pdfResult.success && pdfResult.data && pdfResult.data.url) {
+        pdfUrl = pdfResult.data.url;
+      }
+      
+      // Set message with quotation text
+      setMessage(quotationText);
+      
+      // If WhatsApp integration is enabled and we have a phone number
+      if (onSendWhatsApp && phoneNumber) {
+        try {
+          // Send the WhatsApp message with the PDF
+          await botsailorService.sendWhatsAppMessage({
+            to: phoneNumber,
+            message: quotationText,
+            pdfUrl: pdfUrl
+          });
+          
+          setSnackbarMessage('Quotation sent successfully to WhatsApp');
+          setSnackbarSeverity('success');
+          setSnackbarOpen(true);
+        } catch (whatsappError) {
+          console.error('WhatsApp sending error:', whatsappError);
+          setSnackbarMessage('Failed to send WhatsApp message');
+          setSnackbarSeverity('error');
+          setSnackbarOpen(true);
+        }
+      }
+    } catch (error) {
+      console.error('Error during calculation:', error);
+      setSnackbarMessage('Failed to calculate cutting plan. Please try again.');
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
     }
-    
-    setWhatsappDialogOpen(false);
   };
 
-  const handleCloseSnackbar = () => {
+  const handleCloseSnackbar = (event?: React.SyntheticEvent | Event, reason?: string) => {
+    if (reason === 'clickaway') {
+      return;
+    }
     setSnackbarOpen(false);
   };
 
+  // This function finds all sections based on separator pieces
+  const getSections = () => {
+    const sections: { material: string, pieces: CutPiece[], headingIdx: number }[] = [];
+    if (!cutPieces) return sections;
+
+    let currentPieces: CutPiece[] = [];
+    let currentMaterial: string | undefined;
+    let currentHeadingIdx: number = -1;
+
+    cutPieces.forEach((piece, idx) => {
+      if (piece.separator) {
+        if (currentMaterial !== undefined && currentHeadingIdx !== -1) {
+          sections.push({ material: currentMaterial, pieces: currentPieces, headingIdx: currentHeadingIdx });
+        }
+        currentMaterial = piece.name || 'Unknown Material';
+        currentHeadingIdx = idx;
+        currentPieces = [];
+      } else {
+        currentPieces.push(piece);
+      }
+    });
+
+    if (currentMaterial !== undefined && currentHeadingIdx !== -1) {
+      sections.push({ material: currentMaterial, pieces: currentPieces, headingIdx: currentHeadingIdx });
+    }
+    return sections;
+  };
+
+  const sections = getSections();
+
   return (
-    <Paper sx={{ p: 3, mb: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        Edit Cutting List
-      </Typography>
-      
+    <Paper elevation={3}>
       {isMobile ? (
         // Mobile Card View
         <Box sx={{ p: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="subtitle1">
-              Cut Pieces ({unit})
-            </Typography>
-          </Box>
-          {/* Group cards by material sections based on separators */}
-          {(() => {
-            // Find all section boundaries (separator headings)
-            const sections: { material: string, pieces: CutPiece[], headingIdx: number }[] = [];
-            let currentMaterial = materialCategories[0];
-            let currentPieces: CutPiece[] = [];
-            let headingIdx = 0;
-            let separatorId = '';
-            
-            cutPieces.forEach((piece, idx) => {
-              if (piece.separator) {
-                // Save previous section if it has pieces
-                if (currentPieces.length) {
-                  sections.push({ 
-                    material: currentMaterial, 
-                    pieces: currentPieces, 
-                    headingIdx 
-                  });
-                  currentPieces = [];
-                }
-                // Find material name for heading (exact match from piece.name)
-                currentMaterial = piece.name || materialCategories[0];
-                headingIdx = idx;
-                separatorId = piece.id;
-              } else {
-                currentPieces.push(piece);
-              }
-            });
-            
-            // Push last section
-            if (currentPieces.length) {
-              sections.push({ 
-                material: currentMaterial, 
-                pieces: currentPieces, 
-                headingIdx 
-              });
-            }
-            
-            console.log('Rendered sections:', sections.map(s => `${s.material} (${s.pieces.length} pieces)`));
-            return sections.map((section, sectionIdx) => (
-              <Box key={`section-${sectionIdx}-${section.material}`} sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="subtitle2" sx={{ mr: 1 }}>Material:</Typography>
-                  <FormControl size="small" sx={{ minWidth: 160 }}>
+          {sections.map((section, sectionIdx) => (
+            <Box key={`section-mobile-${sectionIdx}`} sx={{ mb: 3 }}>
+                <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                    <InputLabel>Material</InputLabel>
                     <Select
-                      value={section.material}
-                      onChange={e => {
-                        const newMaterial = e.target.value;
-                        setCutPieces(prevCutPieces => prevCutPieces.map((p, idx) => {
-                          // If this is the separator for this section, update its name
-                          if (p.separator && idx === section.headingIdx) {
-                            return { ...p, name: newMaterial };
-                          }
-                          // If this is a cut piece in this section, update its material
-                          if (section.pieces.some(sp => sp.id === p.id)) {
-                            return { ...p, material: newMaterial };
-                          }
-                          return p;
-                        }));
-                        
-                        // Reset section materials when category changes
-                        setSectionMaterials(prev => {
-                          const updated = {...prev};
-                          delete updated[sectionIdx];
-                          return updated;
-                        });
-                      }}
-                      disabled={isConfirmed || loadingMaterials}
+                        value={section.material}
+                        onChange={(e) => {
+                            const newMaterial = e.target.value;
+                            const updatedPieces = [...cutPieces];
+                            updatedPieces[section.headingIdx].name = newMaterial;
+                            setCutPieces(updatedPieces);
+                        }}
+                        disabled={isConfirmed || loadingMaterials}
                     >
-                      {loadingMaterials ? (
-                        <MenuItem disabled>Loading materials...</MenuItem>
-                      ) : (
-                        materialCategories.map(opt => (
-                          <MenuItem key={opt} value={opt}>{opt}</MenuItem>
-                        ))
-                      )}
+                        {loadingMaterials ? <MenuItem disabled>Loading...</MenuItem> : productDescriptions.map(description => (
+                            <MenuItem key={description} value={description}>{description}</MenuItem>
+                        ))}
                     </Select>
-                  </FormControl>
-                </Box>
-                
-                {/* Cascading material selection dropdowns */}
-                <Box sx={{ mt: 2 }}>
-                  <Grid container spacing={2}>
-                    {/* Color Family Dropdown */}
-                    {section.material && materialData[section.material] && (
-                      <Grid item xs={12} sm={4}>
-                        <FormControl fullWidth size="small">
-                          <InputLabel>Color Family</InputLabel>
-                          <Select
-                            value={sectionMaterials[sectionIdx]?.colorFamily || (section.material === "White Melamine" || section.material === "White Messonite" ? "White" : Object.keys(materialData[section.material])[0])}
-                            onChange={(e) => {
-                              const colorFamily = e.target.value;
-                              // Update section materials state with new selection and reset dependent fields
-                              setSectionMaterials(prev => ({
-                                ...prev,
-                                [sectionIdx]: {
-                                  category: section.material,
-                                  colorFamily: colorFamily,
-                                  // Reset dependent fields
-                                  decorPattern: undefined,
-                                  surfacePattern: undefined
-                                }
-                              }));
-                              
-                              // Generate description for section name
-                              const description = `${section.material} - ${colorFamily}`;
-                              
-                              // Update the name of pieces in this section
-                              setCutPieces(prevCutPieces => prevCutPieces.map((p, idx) => {
-                                // If this is the separator for this section, update its name
-                                if (p.separator && idx === section.headingIdx) {
-                                  return { ...p, name: description };
-                                }
-                                // Update material for all pieces in this section
-                                if (section.pieces.some(sp => sp.id === p.id)) {
-                                  return { ...p, material: description };
-                                }
-                                return p;
-                              }));
-                            }}
-                            disabled={isConfirmed || loadingMaterials}
-                          >
-                            {materialData[section.material] && Object.keys(materialData[section.material]).map(color => (
-                              <MenuItem key={color} value={color}>{color}</MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Grid>
-                    )}
-                    
-                    {/* Decor Pattern Dropdown */}
-                    {section.material && 
-                     materialData[section.material] && 
-                     sectionMaterials[sectionIdx]?.colorFamily && 
-                     materialData[section.material][sectionMaterials[sectionIdx].colorFamily] && (
-                      <Grid item xs={12} sm={4}>
-                        <FormControl fullWidth size="small">
-                          <InputLabel>Decor Pattern</InputLabel>
-                          <Select
-                            value={sectionMaterials[sectionIdx]?.decorPattern || Object.keys(materialData[section.material][sectionMaterials[sectionIdx].colorFamily])[0]}
-                            onChange={(e) => {
-                              const decorPattern = e.target.value;
-                              // Update section materials state
-                              setSectionMaterials(prev => ({
-                                ...prev,
-                                [sectionIdx]: {
-                                  ...prev[sectionIdx],
-                                  decorPattern: decorPattern,
-                                  // Reset dependent fields
-                                  surfacePattern: undefined
-                                }
-                              }));
-                              
-                              // Generate description for section name
-                              const colorFamily = sectionMaterials[sectionIdx].colorFamily;
-                              const description = `${section.material} - ${colorFamily} ${decorPattern}`;
-                              
-                              // Update the name of pieces in this section
-                              setCutPieces(prevCutPieces => prevCutPieces.map((p, idx) => {
-                                // If this is the separator for this section, update its name
-                                if (p.separator && idx === section.headingIdx) {
-                                  return { ...p, name: description };
-                                }
-                                // Update material for all pieces in this section
-                                if (section.pieces.some(sp => sp.id === p.id)) {
-                                  return { ...p, material: description };
-                                }
-                                return p;
-                              }));
-                            }}
-                            disabled={isConfirmed || loadingMaterials}
-                          >
-                            {materialData[section.material][sectionMaterials[sectionIdx].colorFamily] && 
-                             Object.keys(materialData[section.material][sectionMaterials[sectionIdx].colorFamily]).map(pattern => (
-                              <MenuItem key={pattern} value={pattern}>{pattern}</MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Grid>
-                    )}
-                    
-                    {/* Surface Pattern Dropdown */}
-                    {section.material && 
-                      sectionMaterials[sectionIdx]?.colorFamily && 
-                      sectionMaterials[sectionIdx]?.decorPattern && 
-                      materialData[section.material]?.[sectionMaterials[sectionIdx].colorFamily]?.[sectionMaterials[sectionIdx].decorPattern] && (
-                      <Grid item xs={12} sm={4}>
-                        <FormControl fullWidth size="small">
-                          <InputLabel>Surface Pattern</InputLabel>
-                          <Select
-                            value={sectionMaterials[sectionIdx]?.surfacePattern || materialData[section.material][sectionMaterials[sectionIdx].colorFamily][sectionMaterials[sectionIdx].decorPattern][0]}
-                            onChange={(e) => {
-                              const surfacePattern = e.target.value;
-                              // Update section materials state
-                              setSectionMaterials(prev => ({
-                                ...prev,
-                                [sectionIdx]: {
-                                  ...prev[sectionIdx],
-                                  surfacePattern: surfacePattern
-                                }
-                              }));
-                              
-                              // Generate description for section name
-                              const { colorFamily, decorPattern } = sectionMaterials[sectionIdx];
-                              const description = `${section.material} - ${colorFamily} ${decorPattern} (${surfacePattern})`;
-                              
-                              // Update the name of pieces in this section
-                              setCutPieces(prevCutPieces => prevCutPieces.map((p, idx) => {
-                                // If this is the separator for this section, update its name
-                                if (p.separator && idx === section.headingIdx) {
-                                  return { ...p, name: description };
-                                }
-                                // Update material for all pieces in this section
-                                if (section.pieces.some(sp => sp.id === p.id)) {
-                                  return { ...p, material: description };
-                                }
-                                return p;
-                              }));
-                            }}
-                            disabled={isConfirmed || loadingMaterials}
-                          >
-                            {materialData[section.material][sectionMaterials[sectionIdx].colorFamily][sectionMaterials[sectionIdx].decorPattern].map((pattern: string) => (
-                              <MenuItem key={pattern} value={pattern}>{pattern}</MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Grid>
-                    )}
-                  </Grid>
-                  
-                  {/* Display current material selection description */}
-                  {section.material && (
-                    <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary', fontStyle: 'italic' }}>
-                      {section.material}
-                      {sectionMaterials[sectionIdx]?.colorFamily && ` - ${sectionMaterials[sectionIdx].colorFamily}`}
-                      {sectionMaterials[sectionIdx]?.decorPattern && ` ${sectionMaterials[sectionIdx].decorPattern}`}
-                      {sectionMaterials[sectionIdx]?.surfacePattern && ` (${sectionMaterials[sectionIdx].surfacePattern})`}
-                    </Typography>
-                  )}
-                </Box>
-            
-    </Box>
-    {section.pieces.map((piece, index) => (
-      <Paper key={piece.id} elevation={2} sx={{ p: 2, mb: 2 }}>
-        <Typography variant="caption" display="block" gutterBottom>Name</Typography>
-        <TextField
-          fullWidth
-          value={piece.name || ''}
-          onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
-          placeholder={`Cut Piece ${index + 1}`}
-          variant="outlined"
-          size="small"
-          sx={{ mb: 1.5 }}
-          disabled={isConfirmed}
-        />
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
-          <Box sx={{ width: '31%' }}>
-            <Typography variant="caption" display="block" gutterBottom>Length ({data.unit})</Typography>
-            <TextField
-              fullWidth
-              type="number"
-              value={piece.length}
-              onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)}
-              variant="outlined"
-                      fullWidth
-                      value={piece.name || ''}
-                      onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
-                      placeholder={`Cut Piece ${index + 1}`}
-                      variant="outlined"
-                      size="small"
-                      sx={{ mb: 1.5 }}
-                      disabled={isConfirmed}
-                    />
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
-                      <Box sx={{ width: '31%' }}>
-                        <Typography variant="caption" display="block" gutterBottom>Length ({data.unit})</Typography>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          value={piece.length}
-                          onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)}
-                          variant="outlined"
-                          size="small"
-                          inputProps={{ min: 0, step: 0.1 }}
-                          disabled={isConfirmed}
-                        />
-                      </Box>
-                      <Box sx={{ width: '31%' }}>
-                        <Typography variant="caption" display="block" gutterBottom>Width ({data.unit})</Typography>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          value={piece.width}
-                          onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)}
-                          variant="outlined"
-                          size="small"
-                          inputProps={{ min: 0, step: 0.1 }}
-                          disabled={isConfirmed}
-                        />
-                      </Box>
-                      <Box sx={{ width: '31%' }}>
-                        <Typography variant="caption" display="block" gutterBottom>Edging (mm)</Typography>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          value={piece.edging ?? 1}
-                          variant="outlined"
-                          size="small"
-                          disabled
-                        />
-                      </Box>
-                    </Box>
-                    {/* Tick boxes row - mobile */}
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="caption">Length</Typography>
-                        <input
-                          type="checkbox"
-                          checked={!!piece.lengthTick1}
-                          onChange={e => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)}
-                        />
-                        <input
-                          type="checkbox"
-                          checked={!!piece.lengthTick2}
-                          onChange={e => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)}
-                        />
+                </FormControl>
 
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="caption">Width</Typography>
-                        <input
-                          type="checkbox"
-                          checked={!!piece.widthTick1}
-                          onChange={e => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)}
-                          disabled={isConfirmed}
-                        />
-                        <input
-                          type="checkbox"
-                          checked={!!piece.widthTick2}
-                          onChange={e => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)}
-                          disabled={isConfirmed}
-                        />
-                      </Box>
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Box sx={{ width: '48%' }}>
-                        <Typography variant="caption" display="block" gutterBottom>Quantity</Typography>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          value={piece.quantity}
-                          onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)}
-                          variant="outlined"
-                          size="small"
-                          inputProps={{ min: 1, step: 1 }}
-                          disabled={isConfirmed}
-                        />
-                      </Box>
-                      <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" size="small" sx={{ mt: 2}} disabled={isConfirmed}>
-                        <DeleteIcon />
-                      </IconButton>
-                    </Box>
-                  </Paper>
-                ))}
-              </Box>
-            ));
-          })()}
-          {/* Render separator headings as before */}
-          {data.cutPieces.filter(piece => piece.separator).map(piece => (
-            <Paper key={piece.id} elevation={1} sx={{ p: 2, mb: 2, backgroundColor: '#f0f0f0' }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                {piece.name}
-              </Typography>
-            </Paper>
+              {section.pieces.map((piece, pieceIdx) => (
+                <Paper key={piece.id} elevation={2} sx={{ p: 2, mb: 2 }}>
+                  <TextField fullWidth label="Name" value={piece.name || ''} onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)} variant="outlined" size="small" sx={{ mb: 1.5 }} disabled={isConfirmed} />
+                  <Box sx={{ display: 'flex', gap: 2, mb: 1.5 }}>
+                    <TextField label={`Length (${unit})`} type="number" value={piece.length || ''} onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)} variant="outlined" size="small" disabled={isConfirmed} />
+                    <TextField label={`Width (${unit})`} type="number" value={piece.width || ''} onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)} variant="outlined" size="small" disabled={isConfirmed} />
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', mb: 1 }}>
+                    <FormControlLabel control={<Checkbox checked={!!piece.lengthTick1} onChange={e => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)} disabled={isConfirmed} />} label="L1" />
+                    <FormControlLabel control={<Checkbox checked={!!piece.lengthTick2} onChange={e => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)} disabled={isConfirmed} />} label="L2" />
+                    <FormControlLabel control={<Checkbox checked={!!piece.widthTick1} onChange={e => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)} disabled={isConfirmed} />} label="W1" />
+                    <FormControlLabel control={<Checkbox checked={!!piece.widthTick2} onChange={e => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)} disabled={isConfirmed} />} label="W2" />
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2}}>
+                    <TextField label="Quantity" type="number" value={piece.quantity || 1} onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)} variant="outlined" size="small" inputProps={{ min: 1 }} disabled={isConfirmed} />
+                    <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" disabled={isConfirmed}><DeleteIcon /></IconButton>
+                  </Box>
+                </Paper>
+              ))}
+            </Box>
           ))}
-          {/* Render separator headings as before */}
-          {data.cutPieces.filter(piece => piece.separator).map(piece => (
-            <Paper key={piece.id} elevation={1} sx={{ p: 2, mb: 2, backgroundColor: '#f0f0f0' }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                {piece.name}
-              </Typography>
-            </Paper>
-          ))}
-          <Fab 
-            color="primary" 
-            aria-label="add cut piece" 
-            sx={{ position: 'fixed', bottom: 16, right: 16 }} 
-            onClick={handleAddCutPiece}
-            disabled={isConfirmed}
-          >
-            <AddIcon />
-          </Fab>
+          <Fab color="primary" aria-label="add cut piece" sx={{ position: 'fixed', bottom: 16, right: 16 }} onClick={() => handleAddCutPiece()} disabled={isConfirmed}><AddIcon /></Fab>
         </Box>
       ) : (
         // Desktop Table View
         <Box sx={{ p: 3 }}>
-          <Box sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            mb: 2 
-          }}>
-            <Typography variant="subtitle1">
-              Cut Pieces ({data.unit})
-            </Typography>
-            <Button 
-              variant="contained" 
-              startIcon={<AddIcon />}
-              onClick={handleAddCutPiece}
-              size="small"
-              disabled={isConfirmed}
-            >
-              Add Cut Piece
-            </Button>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">Cutlist</Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleAddCutPiece()} disabled={isConfirmed}>Add Piece</Button>
+              <Button variant="outlined" onClick={handleAddMaterialSection} disabled={isConfirmed}>Add Material</Button>
+            </Box>
           </Box>
           <TableContainer component={Paper} elevation={2}>
             <Table stickyHeader size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Name/Desc</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Width ({data.unit})</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Length ({data.unit})</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Edging (mm)</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Quantity</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }} colSpan={1} align="center">Ticks</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', backgroundColor: theme.palette.grey[200] }}>Actions</TableCell>
+                  <TableCell>Material</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Length ({unit})</TableCell>
+                  <TableCell>Width ({unit})</TableCell>
+                  <TableCell align="center">L1</TableCell>
+                  <TableCell align="center">L2</TableCell>
+                  <TableCell align="center">W1</TableCell>
+                  <TableCell align="center">W2</TableCell>
+                  <TableCell>Quantity</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.cutPieces.map((piece, index) => (
+                {cutPieces.map((piece, index) =>
                   piece.separator ? (
                     <TableRow key={piece.id}>
-                      <TableCell colSpan={7} sx={{ backgroundColor: '#f0f0f0', fontWeight: 'bold', color: 'primary.main', fontSize: '1.1em' }}>
-                        {piece.name}
+                      <TableCell colSpan={10} sx={{ backgroundColor: '#f0f0f0' }}>
+                        <FormControl fullWidth size="small">
+                            <Select
+                                variant="standard"
+                                value={piece.name}
+                                onChange={(e) => {
+                                    const newMaterial = e.target.value;
+                                    const updatedPieces = [...cutPieces];
+                                    updatedPieces[index].name = newMaterial;
+                                    // also update material for all subsequent pieces until next separator
+                                    for (let i = index + 1; i < updatedPieces.length; i++) {
+                                        if (updatedPieces[i].separator) break;
+                                        updatedPieces[i].material = newMaterial;
+                                    }
+                                    setCutPieces(updatedPieces);
+                                }}
+                                disabled={isConfirmed || loadingMaterials}
+                            >
+                                {loadingMaterials ? <MenuItem disabled>Loading...</MenuItem> : materialCategories.map(cat => (
+                                    <MenuItem key={cat} value={cat}>{cat}</MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
                       </TableCell>
                     </TableRow>
                   ) : (
                     <TableRow key={piece.id}>
-                      <TableCell>
-                        <TextField
-                          value={piece.name || `Cut Piece ${index + 1}`}
-                          onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
-                          placeholder={`Cut Piece ${index + 1}`}
-                          variant="outlined"
-                          size="small"
-                          disabled={isConfirmed}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          type="number"
-                          value={piece.width}
-                          onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)}
-                          variant="outlined"
-                          size="small"
-                          inputProps={{ min: 0, step: 0.1 }}
-                          disabled={isConfirmed}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          type="number"
-                          value={piece.length}
-                          onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)}
-                          variant="outlined"
-                          size="small"
-                          inputProps={{ min: 0, step: 0.1 }}
-                          disabled={isConfirmed}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          type="number"
-                          value={piece.edging ?? 1}
-                          variant="outlined"
-                          size="small"
-                          disabled
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          type="number"
-                          value={piece.quantity}
-                          onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)}
-                          variant="outlined"
-                          size="small"
-                          inputProps={{ min: 1, step: 1 }}
-                          disabled={isConfirmed}
-                        />
-                      </TableCell>
-                      {/* Tick boxes column */}
-                      <TableCell align="center">
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <span style={{ fontSize: '0.8em' }}>Length</span>
-                            <input
-                              type="checkbox"
-                              checked={!!piece.lengthTick1}
-                              onChange={e => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)}
-                              disabled={isConfirmed}
-                            />
-                            <input
-                              type="checkbox"
-                              checked={!!piece.lengthTick2}
-                              onChange={e => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)}
-                              disabled={isConfirmed}
-                            />
-                          </Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <span style={{ fontSize: '0.8em' }}>Width</span>
-                            <input
-                              type="checkbox"
-                              checked={!!piece.widthTick1}
-                              onChange={e => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)}
-                              disabled={isConfirmed}
-                            />
-                            <input
-                              type="checkbox"
-                              checked={!!piece.widthTick2}
-                              onChange={e => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)}
-                              disabled={isConfirmed}
-                            />
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" size="small" disabled={isConfirmed}>
-                          <DeleteIcon />
-                        </IconButton>
-                      </TableCell>
+                      <TableCell>{piece.material}</TableCell>
+                      <TableCell><TextField size="small" variant="outlined" value={piece.name} onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)} disabled={isConfirmed} /></TableCell>
+                      <TableCell><TextField size="small" variant="outlined" type="number" value={piece.length} onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)} disabled={isConfirmed} /></TableCell>
+                      <TableCell><TextField size="small" variant="outlined" type="number" value={piece.width} onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)} disabled={isConfirmed} /></TableCell>
+                      <TableCell align="center"><Checkbox checked={!!piece.lengthTick1} onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)} disabled={isConfirmed} /></TableCell>
+                      <TableCell align="center"><Checkbox checked={!!piece.lengthTick2} onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)} disabled={isConfirmed} /></TableCell>
+                      <TableCell align="center"><Checkbox checked={!!piece.widthTick1} onChange={(e) => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)} disabled={isConfirmed} /></TableCell>
+                      <TableCell align="center"><Checkbox checked={!!piece.widthTick2} onChange={(e) => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)} disabled={isConfirmed} /></TableCell>
+                      <TableCell><TextField size="small" variant="outlined" type="number" value={piece.quantity} onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)} disabled={isConfirmed} /></TableCell>
+                      <TableCell><IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" disabled={isConfirmed}><DeleteIcon /></IconButton></TableCell>
                     </TableRow>
                   )
-                ))}
+                )}
               </TableBody>
             </Table>
           </TableContainer>
         </Box>
       )}
-      
-      <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+
+      <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+        <Button variant="outlined" color="primary" onClick={handleSave} disabled={isConfirmed}>Save Cutlist</Button>
         <Button 
           variant="contained" 
           color="primary" 
-          startIcon={<SaveIcon />}
-          onClick={handleSave}
-          disabled={isConfirmed} // Disable save if confirmed
+          onClick={handleCalculate}
         >
-          Save Cutlist
+          Confirm Cutlist
         </Button>
-        
         {onSendWhatsApp && (
-          <Button 
-            variant="contained" 
-            color="success" 
-            startIcon={<WhatsAppIcon />}
-            onClick={handleOpenWhatsAppDialog}
-          >
+          <Button variant="contained" color="success" startIcon={<WhatsAppIcon />} onClick={handleOpenWhatsAppDialog}>
             Send to WhatsApp
           </Button>
         )}
       </Box>
-      
-      {/* WhatsApp Dialog */}
+
       <Dialog open={whatsappDialogOpen} onClose={handleCloseWhatsAppDialog}>
         <DialogTitle>Send Cutlist to WhatsApp</DialogTitle>
         <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            <TextField
-              label="Phone Number"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              fullWidth
-              margin="normal"
-              placeholder="+1234567890"
-              required
-            />
-            <TextField
-              label="Customer Name"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              fullWidth
-              margin="normal"
-            />
-            <TextField
-              label="Project Name"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              fullWidth
-              margin="normal"
-            />
-          </Box>
+          <TextField label="Phone Number" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} fullWidth margin="normal" required />
+          <TextField label="Customer Name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} fullWidth margin="normal" />
+          <TextField label="Project Name" value={projectName} onChange={(e) => setProjectName(e.target.value)} fullWidth margin="normal" />
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseWhatsAppDialog}>Cancel</Button>
-          <Button onClick={handleSendWhatsApp} variant="contained" color="primary">
-            Send
-          </Button>
+          <Button onClick={handleSendWhatsApp} color="primary">Send</Button>
         </DialogActions>
       </Dialog>
-      
-      {/* Snackbar for notifications */}
+
       <Snackbar open={snackbarOpen} autoHideDuration={6000} onClose={handleCloseSnackbar}>
         <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} sx={{ width: '100%' }}>
           {snackbarMessage}

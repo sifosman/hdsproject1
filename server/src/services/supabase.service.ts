@@ -261,6 +261,159 @@ const SupabaseService = {
       console.error(`Error in updateInvoiceStatus for ${invoiceNumber}:`, error);
       return { success: false, error: error.message };
     }
+  },
+
+  /**
+   * Fetch material options for cascading dropdowns from the hds_prices table
+   */
+  async getMaterialOptions(): Promise<any> {
+    try {
+      const { data, error } = await supabase
+        .from('hds_prices')
+        .select('description, price')
+        .order('description', { ascending: true });
+      
+      if (error) {
+        console.error('Error fetching material options:', error);
+        return { success: false, error: error.message };
+      }
+
+      if (!data || data.length === 0) {
+        return { success: false, error: 'No material options found' };
+      }
+      
+      return { 
+        success: true, 
+        data: data
+      };
+    } catch (error: any) {
+      console.error('Error in getMaterialOptions:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Get all product descriptions
+   */
+  async getProductDescriptions(): Promise<any> {
+    try {
+      const { data, error } = await supabase
+        .from('hds_prices')
+        .select('description')
+        .order('description', { ascending: true });
+      
+      if (error) {
+        console.error('Error fetching product descriptions:', error);
+        return { success: false, error: error.message };
+      }
+
+      if (!data || data.length === 0) {
+        return { success: false, error: 'No product descriptions found' };
+      }
+      
+      return { 
+        success: true, 
+        data: data
+      };
+    } catch (error: any) {
+      console.error('Error in getProductDescriptions:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Save cutlist data to the cutlists table
+   */
+  async saveCutlist(cutlistData: any): Promise<any> {
+    try {
+      // Ensure the cutlist data has all required fields
+      const cutlist = {
+        id: cutlistData.id,
+        customer_name: cutlistData.customerName || null,
+        project_name: cutlistData.projectName || null,
+        phone_number: cutlistData.phoneNumber || null,
+        unit: cutlistData.unit || 'mm',
+        ocr_text: cutlistData.ocrText || null,
+        cut_pieces: cutlistData.cutPieces || [],
+        stock_pieces: cutlistData.stockPieces || [],
+        materials: cutlistData.materials || [],
+        is_confirmed: cutlistData.isConfirmed || false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      // Insert cutlist into database
+      const { data, error } = await supabase
+        .from('cutlists')
+        .insert([cutlist])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving cutlist:', error);
+        return { success: false, error: error.message };
+      }
+
+      return {
+        success: true,
+        data: {
+          id: data.id,
+          customerName: data.customer_name,
+          createdAt: data.created_at
+        }
+      };
+    } catch (error: any) {
+      console.error('Error in saveCutlist:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Get cutlist data by ID from the cutlists table
+   */
+  async getCutlistById(cutlistId: string): Promise<any> {
+    try {
+      console.log(`Fetching cutlist with ID ${cutlistId} from Supabase`);
+      
+      const { data, error } = await supabase
+        .from('cutlists')
+        .select('*')
+        .eq('id', cutlistId)
+        .single();
+      
+      if (error) {
+        console.error(`Error fetching cutlist with ID ${cutlistId}:`, error);
+        return { success: false, error: error.message };
+      }
+      
+      if (!data) {
+        console.log(`Cutlist with ID ${cutlistId} not found in Supabase`);
+        return { success: false, error: 'Cutlist not found' };
+      }
+      
+      // Transform the data to match the expected format for the frontend
+      const transformedData = {
+        _id: data.id,
+        cutPieces: data.cut_pieces || [],
+        stockPieces: data.stock_pieces || [],
+        materials: data.materials || [],
+        unit: data.unit || 'mm',
+        customerName: data.customer_name || '',
+        projectName: data.project_name || '',
+        phoneNumber: data.phone_number || '',
+        ocrText: data.ocr_text || '',
+        isConfirmed: data.is_confirmed || false,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at
+      };
+      
+      console.log(`Cutlist found in Supabase:`, transformedData);
+      
+      return { success: true, data: transformedData };
+    } catch (error: any) {
+      console.error(`Error in getCutlistById for ${cutlistId}:`, error);
+      return { success: false, error: error.message };
+    }
   }
 };
 

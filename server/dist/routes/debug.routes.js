@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const axios_1 = __importDefault(require("axios"));
+const supabase_service_1 = __importDefault(require("../services/supabase.service"));
 const router = express_1.default.Router();
 // Debug endpoint to test the n8n workflow and recipient value
 router.post('/test-recipient', ((req, res) => {
@@ -141,6 +142,76 @@ router.post('/test-botsailor', ((req, res) => {
                 success: false,
                 message: 'Error in Botsailor format test',
                 error: error.message
+            });
+        }
+    }))();
+}));
+// Debug endpoint to test Supabase connection and cutlist creation
+router.get('/test-supabase', ((req, res) => {
+    (() => __awaiter(void 0, void 0, void 0, function* () {
+        try {
+            console.log('===== SUPABASE CONNECTION TEST =====');
+            // Step 1: Test basic connection to Supabase
+            const connectionResult = yield supabase_service_1.default.checkConnection();
+            if (!connectionResult) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Supabase connection test failed',
+                    error: 'Could not connect to Supabase'
+                });
+            }
+            console.log('Basic connection test successful');
+            // Step 2: Test material options query (existing functionality)
+            const materialResult = yield supabase_service_1.default.getMaterialOptions();
+            // Step 3: Test cutlist table by creating a test cutlist
+            const testId = `test-${new Date().getTime()}`;
+            const testCutlistData = {
+                id: testId,
+                customerName: 'Test Customer',
+                phoneNumber: '+27123456789',
+                ocrText: 'Test OCR Text\n800 x 400',
+                cutPieces: [
+                    {
+                        length: 800,
+                        width: 400,
+                        quantity: 1,
+                        description: 'Test piece'
+                    }
+                ],
+                unit: 'mm'
+            };
+            console.log('Attempting to save test cutlist with ID:', testId);
+            const saveResult = yield supabase_service_1.default.saveCutlist(testCutlistData);
+            // Return all test results
+            return res.status(200).json({
+                success: true,
+                message: 'Supabase tests completed',
+                connectionTest: {
+                    success: connectionResult,
+                },
+                materialOptionsTest: {
+                    success: materialResult.success,
+                    categoriesCount: materialResult.success ? materialResult.data.categories.length : 0,
+                    error: !materialResult.success ? materialResult.error : null
+                },
+                cutlistSaveTest: {
+                    success: saveResult.success,
+                    testId: testId,
+                    data: saveResult.success ? saveResult.data : null,
+                    error: !saveResult.success ? saveResult.error : null
+                },
+                environment: {
+                    supabaseUrlConfigured: Boolean(process.env.SUPABASE_URL),
+                    supabaseKeyConfigured: Boolean(process.env.SUPABASE_ANON_KEY)
+                }
+            });
+        }
+        catch (error) {
+            console.error('Error in Supabase test:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Error in Supabase connection test',
+                error: error.message || 'Unknown error'
             });
         }
     }))();

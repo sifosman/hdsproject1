@@ -40,4 +40,14 @@ router.post('/payments/process', function(req: Request, res: Response) {
   supabaseController.processPayment(req, res);
 });
 
+// Material options for cascading dropdowns
+router.get('/materials/options', function(req: Request, res: Response) {
+  supabaseController.getMaterialOptions(req, res);
+});
+
+// Get all product descriptions for material dropdown
+router.get('/products/descriptions', function(req: Request, res: Response) {
+  supabaseController.getProductDescriptions(req, res);
+});
+
 export default router;

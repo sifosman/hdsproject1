@@ -118,12 +118,81 @@ export const webhookDirectController = {
       const uniqueId = new Date().getTime().toString();
       const baseUrl = process.env.BASE_URL || 'https://hds-sifosmans-projects.vercel.app';
       
-      // Use the cutlist-edit URL with the unique ID
-      const cutlistUrl = `${baseUrl}/cutlist-edit/${uniqueId}`;
-      
       // Simple way to extract dimensions count
       const dimensionsCount = ocrText ? 
         ocrText.split('\n').filter((line: string) => /\d+\s*[xX]\s*\d+/.test(line)).length : 0;
+      
+      // Extract potential cut pieces from OCR text
+      const cutPieces = [];
+      if (ocrText) {
+        const lines = ocrText.split('\n');
+        for (const line of lines) {
+          // Check if line contains dimensions (e.g., 800 x 400)
+          if (/\d+\s*[xX]\s*\d+/.test(line)) {
+            const match = line.match(/(\d+)\s*[xX]\s*(\d+)/);
+            if (match) {
+              const [_, length, width] = match;
+              cutPieces.push({
+                length: parseInt(length),
+                width: parseInt(width),
+                quantity: 1,
+                description: line
+              });
+            }
+          }
+        }
+      }
+      
+      // Save cutlist data to Supabase
+      const cutlistData = {
+        id: uniqueId,
+        customerName: senderName,
+        phoneNumber: phoneNumber,
+        ocrText: ocrText,
+        cutPieces: cutPieces,
+        unit: 'mm' // Default unit
+      };
+      
+      // First check if Supabase is connected
+      console.log('Checking Supabase connection...');
+      const connectionResult = await SupabaseService.checkConnection();
+      
+      if (!connectionResult) {
+        console.error('Supabase connection check failed');
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to connect to database',
+          error: 'Supabase connection error'
+        });
+      }
+      
+      console.log('Supabase connection OK, attempting to save cutlist:', JSON.stringify(cutlistData, null, 2));
+      
+      // Try to save cutlist to Supabase with detailed error logging
+      try {
+        const saveResult = await SupabaseService.saveCutlist(cutlistData);
+        
+        if (!saveResult.success) {
+          console.error('Failed to save cutlist - explicit error:', saveResult.error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to save cutlist data',
+            error: saveResult.error || 'Unknown database error'
+          });
+        }
+      } catch (error: any) {
+        console.error('Exception during cutlist save operation:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Exception occurred while saving cutlist data',
+          error: error?.message || 'Unknown error'
+        });
+      }
+      
+      console.log('Cutlist saved successfully with ID:', uniqueId);
+      
+      // Use the cutlist-edit URL with the unique ID
+      const cutlistUrl = `${baseUrl}/cutlist-edit/${uniqueId}`;
       
       // Extract potential product codes from OCR text
       // This is a simplified example - in production you'd need proper parsing based on your specific format
