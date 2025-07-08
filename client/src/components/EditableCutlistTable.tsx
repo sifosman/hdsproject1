@@ -37,55 +37,9 @@ import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import { Fab } from '@mui/material'; // Added Fab for mobile
+import type { StockPiece, CutPiece, Material, CutlistData, EditableCutlistTableProps } from './types';
 
 // TabPanel component removed as it's no longer needed
-
-interface StockPiece {
-  id: string;
-  width: number;
-  length: number;
-  quantity: number;
-  material?: string;
-}
-
-interface CutPiece {
-  id: string;
-  width?: number;
-  length?: number;
-  quantity?: number;
-  name?: string;
-  edging?: number; // in mm, always 1mm
-  separator?: boolean;
-  lengthTick1?: boolean;
-  lengthTick2?: boolean;
-  widthTick1?: boolean;
-  widthTick2?: boolean;
-  material?: string; // Section material
-}
-
-interface Material {
-  id: string;
-  name: string;
-  type: string;
-  thickness: number;
-}
-
-interface CutlistData {
-  stockPieces: StockPiece[];
-  cutPieces: CutPiece[];
-  materials: Material[];
-  unit: string;
-  customerName?: string;
-  projectName?: string;
-}
-
-interface EditableCutlistTableProps {
-  initialData: CutlistData;
-  onSave: (data: CutlistData) => void;
-  onSendWhatsApp?: (phoneNumber: string, data: CutlistData, customerName?: string, projectName?: string) => void;
-  isMobile?: boolean;
-  isConfirmed?: boolean;
-}
 
 const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({ 
   initialData, 
