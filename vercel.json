@@ -1,7 +1,19 @@
 {
+  "version": 2,
+
+  // 1️⃣ build both parts first
   "buildCommand": "npm run build",
+
+  // 2️⃣ tell Vercel which artefacts to publish
+  "builds": [
+    { "src": "server/dist/index.js", "use": "@vercel/node" },
+    { "src": "client/dist/**",       "use": "@vercel/static" }
+  ],
+
+  // 3️⃣ optional: static output dir for analytics/UI
   "outputDirectory": "client/dist",
 
+  // 4️⃣ routing
   "routes": [
     { "src": "/api/(.*)", "dest": "server/dist/index.js" },
     { "src": "/(.*)",     "dest": "client/dist/index.html" }
