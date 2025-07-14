@@ -24,6 +24,16 @@ const extractDimensionsFromText = (ocrText) => {
     let unit = 'mm';
     // Log the full OCR text for debugging
     console.log('Full OCR text:', ocrText);
+    // Define material keywords and their properties
+    const MATERIAL_KEYWORDS = [
+        {
+            keys: ['backing board', 'masonite', 'mdf', 'white mdf'],
+            id: '202',
+            name: 'MEL MDF Platinum White 9x6x3 SF',
+            displayName: 'White Messonite'
+        }
+    ];
+    let currentMaterial = null;
     // Enhanced regex patterns focused on real-world OCR text formats
     const dimensionPatterns = [
         // Format: "2000x 460=2" or "918x460=4" (with equals sign, allows for noise)
@@ -41,9 +51,23 @@ const extractDimensionsFromText = (ocrText) => {
     // Process each line
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
+        // Check for material keywords first
+        let isMaterialHeader = false;
+        for (const { keys, id, name, displayName } of MATERIAL_KEYWORDS) {
+            if (keys.some(keyword => line.toLowerCase().includes(keyword.toLowerCase()))) {
+                currentMaterial = { id, name, displayName };
+                console.log(`Found material header: ${line}, setting current material to ${displayName}`);
+                isMaterialHeader = true;
+                break;
+            }
+        }
+        if (isMaterialHeader) {
+            continue; // Skip further processing for this line
+        }
+        if (!line)
+            continue; // Skip empty lines
         // Skip empty lines or header/category lines
-        if (!line ||
-            line.toLowerCase() === 'doors' ||
+        if (line.toLowerCase() === 'doors' ||
             line.toLowerCase().includes('white') && line.length < 15) {
             continue;
         }
@@ -120,7 +144,10 @@ const extractDimensionsFromText = (ocrText) => {
                 id: `dim-${Date.now()}-${dimensions.length}`,
                 width,
                 length,
-                quantity
+                quantity,
+                material: currentMaterial ? currentMaterial.name : undefined,
+                materialId: currentMaterial ? currentMaterial.id : undefined,
+                materialDisplayName: currentMaterial ? currentMaterial.displayName : undefined
             });
         }
         if (!matched) {

@@ -44,55 +44,16 @@ import { Fab } from '@mui/material'; // Added Fab for mobile
 
 // TabPanel component removed as it's no longer needed
 
-interface StockPiece {
-  id: string;
-  width: number;
-  length: number;
-  quantity: number;
-  material?: string;
-}
+import type { StockPiece, CutPiece, Material, CutlistData, EditableCutlistTableProps } from './EditableCutlistTable/types';
 
-interface CutPiece {
-  id: string;
-  width?: number;
-  length?: number;
-  quantity?: number;
-  name?: string;
-  edging?: number; // in mm, always 1mm
-  separator?: boolean;
-  lengthTick1?: boolean;
-  lengthTick2?: boolean;
-  widthTick1?: boolean;
-  widthTick2?: boolean;
-  material?: string; // Section material
-}
-
-interface Material {
-  id: string;
-  name: string;
-  type: string;
-  thickness: number;
-}
-
-interface CutlistData {
-  stockPieces: StockPiece[];
-  cutPieces: CutPiece[];
-  materials: Material[];
-  unit: string;
-  customerName?: string;
-  projectName?: string;
-  rawText?: string; // OCR text for direct parsing
-}
-
-interface EditableCutlistTableProps {
-  initialData: CutlistData;
-  onSave: (data: CutlistData) => void;
-  onSendWhatsApp?: (phoneNumber: string, data: CutlistData, customerName?: string, projectName?: string) => void;
-  isMobile?: boolean;
-  isConfirmed?: boolean;
-  branchData?: any | null;
-  requireMaterialValidation?: boolean;
-}
+import { 
+  parseOcrText, 
+  normalizeCutPieces,
+  extractQuantityFromDescription, 
+  calculateEdging,
+  downloadPdf,
+  extractDimensions
+} from './EditableCutlistTable/utils';
 
 const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({ 
   initialData, 
@@ -126,112 +87,8 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   // referenced by normalizeCutPieces(). Declaring them here avoids the
   // "Cannot access '<var>' before initialization" runtime error.
   // Function to directly parse OCR text and extract dimensions and materials
-  const parseOcrText = (ocrText: string | undefined): { dimensions: any[], materials: string[] } => {
-    if (!ocrText) return { dimensions: [], materials: [] };
-    
-    const dimensions: any[] = [];
-    const materials: string[] = [];
-    let currentMaterial = DEFAULT_MATERIAL_CATEGORIES[0];
-    
-    // Split OCR text into lines
-    const lines = ocrText.split('\n').filter(line => line.trim() !== '');
-    console.log(`Parsing ${lines.length} lines of OCR text`);
-    
-    // Look for material headings and dimensions
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      console.log(`Processing line: "${line}"`);
-      
-      // Check if this is a material heading
-      let isMaterialHeading = false;
-      for (const heading of materialHeadings) {
-        if (line.toLowerCase().includes(heading.key.toLowerCase())) {
-          // This looks like a material heading
-          if (!line.match(/\d+\s*[xX×*]\s*\d+/)) { // No dimensions in this line
-            currentMaterial = heading.value;
-            if (!materials.includes(currentMaterial)) {
-              materials.push(currentMaterial);
-              console.log(`Found material heading: ${currentMaterial}`);
-            }
-            isMaterialHeading = true;
-            break;
-          }
-        }
-      }
-      
-      if (isMaterialHeading) continue;
-      
-      // Try to extract dimensions
-      const dimensionMatch = line.match(/(\d+)\s*[xX×*]\s*(\d+)/);
-      if (dimensionMatch) {
-        const width = parseInt(dimensionMatch[1]);
-        const length = parseInt(dimensionMatch[2]);
-        
-        // Extract quantity if present
-        let quantity = 1;
-        const quantityMatch = line.match(/[=\-]\s*(\d+)/) || line.match(/\(\s*(\d+)\s*\)/) || line.match(/\d+\s*[xX×*]\s*\d+\s+(\d+)\b/);
-        if (quantityMatch) {
-          quantity = parseInt(quantityMatch[1]);
-        }
-        
-        dimensions.push({
-          id: `dim-${Date.now()}-${dimensions.length}`,
-          width,
-          length,
-          quantity,
-          material: currentMaterial,
-          description: line // Store the original line for reference
-        });
-        
-        console.log(`Added dimension: ${width}x${length}, qty=${quantity}, material=${currentMaterial}`);
-      }
-    }
-    
-    // Make sure we have at least one material
-    if (materials.length === 0) {
-      materials.push(DEFAULT_MATERIAL_CATEGORIES[0]);
-    }
-    
-    return { dimensions, materials };
-  };
   
-  // Function to extract quantity from description field
-  const extractQuantityFromDescription = (description: string | undefined): number | null => {
-    if (!description) return null;
-    
-    // Array of regex patterns to extract quantity from description
-    const patterns = [
-      // Format: "2000x 460=2" or "918x460=4" (with equals sign)
-      /\s*[xX×*]\s*\d+\s*=\s*(\d+)/,
-      
-      // Format: "360x140-8" (with dash)
-      /\s*[xX×*]\s*\d+\s*-\s*(\d+)/,
-      
-      // Format: at the end of string after dimensions
-      /\s*[xX×*]\s*\d+\s+(\d+)$/,
-      
-      // Format: parentheses (3)
-      /\(\s*(\d+)\s*\)/,
-      
-      // Last resort: any number at the end
-      /\s(\d+)$/
-    ];
-    
-    // Try each pattern
-    for (const pattern of patterns) {
-      const match = description.match(pattern);
-      if (match && match[1]) {
-        const qty = parseInt(match[1], 10);
-        if (!isNaN(qty) && qty > 0) {
-          console.log(`Extracted quantity ${qty} from description: ${description}`);
-          return qty;
-        }
-      }
-    }
-    
-    return null;
-  };
-  
+
   // ------------------------------------------------------------------
   const materialHeadings = [
     { key: "white melamine", value: "White Melamine" },
@@ -256,7 +113,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     // Check if we have raw OCR text to parse directly
     if (initialData.rawText && !hasDirectlyParsed) {
       console.log('Direct OCR parsing activated');
-      const { dimensions, materials } = parseOcrText(initialData.rawText);
+      const { dimensions, materials } = parseOcrText(initialData.rawText, DEFAULT_MATERIAL_CATEGORIES);
       
       // Save detected materials for later use
       if (materials.length > 0) {
@@ -264,16 +121,33 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         setDetectedMaterials(materials);
       }
       
-      // If we got meaningful results from direct parsing, use those
-      if (dimensions.length > 0) {
-        console.log(`Directly parsed ${dimensions.length} dimensions from OCR text`);
-        setHasDirectlyParsed(true);
-        return normalizeCutPieces(dimensions);
-      }
+      // Convert dimensions to cut pieces
+      const pieces: CutPiece[] = dimensions.map((dim, idx) => ({
+        id: `dim-${Date.now()}-${idx}`,
+        width: dim.width,
+        length: dim.length,
+        count: dim.quantity,
+        material: dim.material,
+        done: false,
+        doneCount: 0,
+        externalId: dim.id,
+        label: '',
+        edge: { top: false, bottom: false, left: false, right: false },
+      }));
+      
+      // Mark that we've parsed the OCR text
+      setHasDirectlyParsed(true);
+      
+      return pieces;
     }
     
-    // Fallback to normal normalization
-    return normalizeCutPieces(initialData.cutPieces || []);
+    // If we have initial cut pieces, use them
+    if (initialData.cutPieces && initialData.cutPieces.length > 0) {
+      return normalizeCutPieces(initialData.cutPieces, DEFAULT_MATERIAL_CATEGORIES);
+    }
+    
+    // Otherwise, return an empty array
+    return [];
   });
   const [stockPieces, setStockPieces] = useState<StockPiece[]>(initialData?.stockPieces || []);
   const [materials, setMaterials] = useState<Material[]>(initialData?.materials || []);
@@ -306,185 +180,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     surfacePattern?: string;
     materialDescription?: string;
   }
-
   const [sectionMaterials, setSectionMaterials] = useState<Record<number, SectionMaterial>>({});
-  
-  // Debug function to examine raw and normalized data
-  function logRawPiecesForDebug(rawPieces: any[]) {
-    console.log('====== DEBUG: RAW CUTLIST DATA ======');
-    rawPieces.forEach((p, i) => {
-      console.log(`[${i}] Name: "${p.name}" | Length: ${p.length} | Width: ${p.width}`);
-    });
-    console.log('====================================');
-  }
-
-  // Completely rewritten: Insert separator cut pieces for every heading
-  function normalizeCutPieces(rawPieces: any[]): CutPiece[] {
-    // Debug the raw input
-    logRawPiecesForDebug(rawPieces);
-    
-    // Add detailed logging for quantities
-    console.log('===== QUANTITY DEBUGGING =====');
-    rawPieces.forEach((piece, index) => {
-      console.log(`Raw Piece ${index}: name=${piece.name || piece.description || 'unnamed'}, width=${piece.width}, length=${piece.length}, quantity=${piece.quantity}, type=${typeof piece.quantity}`);
-    });
-
-    const normalized: CutPiece[] = [];
-    let currentMaterial = DEFAULT_MATERIAL_CATEGORIES[0];
-    let materialSeen = new Set<string>();
-    materialSeen.add(currentMaterial); // Always add the default material
-    
-    // We will skip rows that are detected as pure material headings so they are not
-  // added twice (once as a separator and once as a normal cut-piece row)
-  const headingRowIndexes = new Set<number>();
-    
-    for (let i = 0; i < rawPieces.length; i++) {
-      const piece = rawPieces[i];
-      // Clean the name for comparison - remove all non-alphanumeric chars
-      const cleanName = (piece.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      
-      // Check each material heading for match
-      for (const heading of materialHeadings) {
-        const cleanHeading = heading.key.replace(/[^a-z0-9]/g, '');
-        
-        // If name contains the heading and has no measurements, it's likely a heading row
-        // If the row looks like a pure material heading (no measurements)
-        if (cleanName.includes(cleanHeading) && (!piece.width && !piece.length)) {
-          headingRowIndexes.add(i);
-          console.log(`Found material heading at row ${i}: ${piece.name} -> ${heading.value}`);
-          break;
-        }
-      }
-    }
-
-    // Special case for empty data - ensure at least one material is visible
-    if (rawPieces.length === 0) {
-      // Add a default separator
-      normalized.push({
-        id: `sep-default-${Date.now()}`,
-        name: DEFAULT_MATERIAL_CATEGORIES[0],
-        separator: true,
-      });
-      return normalized;
-    }
-
-    // Add first material heading if not already the first item
-    let currentIndex = 0;
-    if (!headingRowIndexes.has(0)) {
-      normalized.push({
-        id: `sep-0-${Date.now()}`,
-        name: DEFAULT_MATERIAL_CATEGORIES[0],
-        separator: true,
-      });
-      currentMaterial = DEFAULT_MATERIAL_CATEGORIES[0];
-    }
-
-    // Process each piece
-    for (let i = 0; i <rawPieces.length; i++) {
-      const piece = rawPieces[i];
-
-      // NEW: Inject separator based on explicit material field
-      if (piece.material && !materialSeen.has(piece.material)) {
-        normalized.push({
-          id: `separator-${Date.now()}-${i}`,
-          separator: true,
-          name: piece.material,
-        });
-        materialSeen.add(piece.material);
-        currentMaterial = piece.material;
-      }
-
-      // If this is a material heading row, insert a separator
-      if (headingRowIndexes.has(i)) {
-        // Find the matching material
-        const cleanName = (piece.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const matchedHeading = materialHeadings.find(heading => {
-          const cleanHeading = heading.key.replace(/[^a-z0-9]/g, '');
-          return cleanName.includes(cleanHeading);
-        });
-        
-        // Add separator for this material
-        if (matchedHeading) {
-          normalized.push({
-            id: `sep-${i}-${Date.now()}`,
-            name: matchedHeading.value,
-            separator: true,
-          });
-          currentMaterial = matchedHeading.value;
-          console.log(`Adding separator: ${currentMaterial}`);
-        }
-        // Skip adding this piece as a normal cut piece
-        continue;
-      }
-      
-      // Normal cut piece - add with current material
-    // Use piece.name or piece.description to accommodate API response format
-    if ((piece.name || piece.description) && (piece.width || piece.length || piece.quantity)) {
-      // Debug quantity before normalization
-      console.log(`Before normalization - Piece ${i}: quantity=${piece.quantity}, type=${typeof piece.quantity}`);
-      
-      // Force quantity to be a number type, but preserve the original value if it exists
-  // Only default to 1 if quantity is undefined or null
-  let quantityValue = piece.quantity !== undefined && piece.quantity !== null ? Number(piece.quantity) : 1;
-  
-  // If quantity is 1, try to extract a better quantity from the description
-  if (quantityValue === 1 && (piece.description || piece.name)) {
-    const extractedQty = extractQuantityFromDescription(piece.description || piece.name);
-    if (extractedQty !== null) {
-      console.log(`Overriding quantity from 1 to ${extractedQty} based on description`);
-      quantityValue = extractedQty;
-    }
-  }
-  
-  console.log(`Final quantity for piece ${i}: ${quantityValue}`);
-    
-    // Ensure we preserve the original quantity explicitly
-      const normalizedPiece = {
-        ...piece,
-        quantity: quantityValue, // Force as number and ensure it's preserved
-        edging: piece.edging ?? 1,
-        separator: false,
-        lengthTick1: piece.lengthTick1 ?? false,
-        lengthTick2: piece.lengthTick2 ?? false,
-        widthTick1: piece.widthTick1 ?? false,
-        widthTick2: piece.widthTick2 ?? false,
-        material: currentMaterial,
-      };
-      
-      // Debug the normalized piece
-      console.log(`After normalization - Piece ${i}: quantity=${normalizedPiece.quantity}, type=${typeof normalizedPiece.quantity}`);
-      
-      normalized.push(normalizedPiece);
-      }
-    }
-
-    // Log the normalized data for debugging
-    console.log('Normalized pieces:', normalized.map((p, i) => {
-      if (p.separator) {
-        return `[${i}] SEPARATOR: ${p.name}`;
-      }
-      return `[${i}] ${p.name} (${p.material}) - ${p.length}x${p.width} quantity=${p.quantity}`;
-    }));
-    
-    // Final quantity check
-    console.log('===== FINAL QUANTITY CHECK =====');
-    normalized.forEach((piece, index) => {
-      if (!piece.separator) {
-        console.log(`Final Piece ${index}: name=${piece.name || 'unnamed'}, quantity=${piece.quantity}, type=${typeof piece.quantity}`);
-      }
-    });
-    
-    return normalized;
-  }
-  // Safe version of initial data for reference
-  const safeInitialData: CutlistData = {
-    stockPieces: initialData?.stockPieces || [],
-    cutPieces: normalizeCutPieces(initialData?.cutPieces || []),
-    materials: initialData?.materials || [],
-    unit: initialData?.unit || 'mm',
-    customerName: initialData?.customerName || '',
-    projectName: initialData?.projectName || '',
-  };
   
   // Fetch material options from API on component mount
   useEffect(() => {
@@ -515,7 +211,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
 
   useEffect(() => {
     if (initialData) {
-      const normalized = normalizeCutPieces(initialData.cutPieces || []);
+      const normalized = normalizeCutPieces(initialData.cutPieces || [], DEFAULT_MATERIAL_CATEGORIES);
       setCutPieces(normalized);
       setStockPieces(initialData.stockPieces || []);
       setMaterials(initialData.materials || []);
@@ -559,6 +255,13 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       handleAddMaterialSection();
     }
   }, [detectedMaterials.length]);
+
+  useEffect(() => {
+    console.log('Initial data:', initialData);
+    console.log('Cut pieces:', cutPieces);
+    console.log('Stock pieces:', stockPieces);
+    console.log('Materials:', materials);
+  }, []);
 
   const handleCutPieceChange = (id: string, field: keyof CutPiece, value: any) => {
     setCutPieces(prevCutPieces =>
@@ -770,83 +473,6 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     }
   };
 
-  // Function to calculate edging based on checkbox selections
-  const calculateEdging = (piece: CutPiece): number => {
-    const edgesToCount = [
-      piece.lengthTick1,
-      piece.lengthTick2,
-      piece.widthTick1,
-      piece.widthTick2
-    ].filter(Boolean).length;
-    
-    return edgesToCount > 0 ? 1 : 0; // Return 1 if any edge is selected, 0 otherwise
-  };
-
-  // Utility function to download a PDF from a URL
-  const downloadPdf = (url: string, filename: string) => {
-    // Check if it's a data URL or regular URL
-    let downloadUrl = url;
-    
-    // If it's a regular URL (not a data URL), make sure it's absolute
-    if (!url.startsWith('data:')) {
-      downloadUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
-    }
-    
-    console.log(`Preparing PDF download with URL type: ${url.startsWith('data:') ? 'data URL' : 'regular URL'}`);
-    
-    // Create a link element and simulate a click to trigger download
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.setAttribute('download', filename);
-    link.setAttribute('target', '_blank');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Function to extract dimensions from product data
-  const extractDimensions = (productData: any): { width: number; length: number; thickness: number } => {
-    // Default values
-    const defaultDimensions = { width: 2750, length: 1830, thickness: 16 };
-    
-    try {
-      if (!productData) return defaultDimensions;
-      
-      // First priority: check if sizes field exists with format "LxWxT"
-      if (productData.sizes && typeof productData.sizes === 'string') {
-        const sizesParts = productData.sizes.split('x');
-        if (sizesParts.length === 3) {
-          return {
-            length: parseInt(sizesParts[0], 10) || defaultDimensions.length,
-            width: parseInt(sizesParts[1], 10) || defaultDimensions.width,
-            thickness: parseInt(sizesParts[2], 10) || defaultDimensions.thickness
-          };
-        }
-      }
-      
-      // Fallback to parsing from description
-      if (productData && productData.description) {
-        const description = productData.description;
-        const dimensionPattern = /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)\s*mm/i;
-        const match = description.match(dimensionPattern);
-        
-        if (match && match.length === 4) {
-          return {
-            length: parseInt(match[1], 10) || defaultDimensions.length,
-            width: parseInt(match[2], 10) || defaultDimensions.width,
-            thickness: parseInt(match[3], 10) || defaultDimensions.thickness
-          };
-        }
-      }
-      
-      return defaultDimensions;
-    } catch (error) {
-      console.error('Error extracting dimensions:', error);
-      return defaultDimensions;
-    }
-  };
-
-  // Function to send cutlist data to the calculation tool
   const handleCalculate = () => {
     // Validate data
     if (cutPieces.length === 0) {
