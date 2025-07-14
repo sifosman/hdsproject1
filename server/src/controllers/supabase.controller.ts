@@ -258,7 +258,94 @@ const supabaseController = {
       console.error('Error fetching product descriptions:', error);
       return res.status(500).json({ success: false, message: error.message });
     }
+  },
+  
+  /**
+   * Get product pricing by description from Supabase
+   */
+  async getProductPricingByDescription(req: Request, res: Response) {
+    try {
+      const { description } = req.query;
+      const includeSizes = req.query.includeSizes === 'true';
+      
+      if (!description) {
+        return res.status(400).json({ success: false, message: 'Product description is required' });
+      }
+      
+      const result = await SupabaseService.getProductPricingByDescription(description.toString(), includeSizes);
+      
+      if (!result.success) {
+        return res.status(404).json({ success: false, message: result.error || 'Product pricing not found' });
+      }
+      
+      return res.status(200).json({ success: true, data: result.data });
+    } catch (error: any) {
+      console.error('Error fetching product pricing by description:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  },
+  /**
+   * Get branch by trading_as value
+   */
+  getBranchByTradingAs: async (req: Request, res: Response) => {
+    try {
+      const { tradingAs } = req.params;
+      if (!tradingAs) {
+        return res.status(400).json({ success: false, message: 'tradingAs parameter is required' });
+      }
+      const result = await SupabaseService.getBranchByTradingAs(tradingAs);
+      if (!result.success) {
+        return res.status(404).json({ success: false, message: result.error || 'Branch not found' });
+      }
+      return res.status(200).json({ success: true, data: result.data });
+    } catch (error: any) {
+      console.error('Error fetching branch by trading_as:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  },
+  
+  /**
+   * Upload a quote PDF to the hdsquotes bucket
+   */
+  uploadQuotePdf: async (req: Request, res: Response) => {
+    try {
+      // Check if file exists in the request
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No PDF file provided' });
+      }
+
+      const fileBuffer = req.file.buffer;
+      const fileName = `quote-${Date.now()}-${req.file.originalname}`;
+
+      // Upload file to Supabase storage
+      const result = await SupabaseService.uploadQuotePdf(fileBuffer, fileName);
+
+      if (!result.success) {
+        return res.status(500).json({ 
+          success: false, 
+          message: result.error || 'Failed to upload PDF to storage'
+        });
+      }
+
+      // If quoteid is provided, update the quote with the pdf url
+      if (req.body.quoteId) {
+        await SupabaseService.updateQuotePdfUrl(req.body.quoteId, result.publicUrl || '');
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'PDF uploaded successfully',
+        data: {
+          fileName,
+          url: result.publicUrl
+        }
+      });
+    } catch (error: any) {
+      console.error('Error uploading quote PDF:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
   }
+
 };
 
 export default supabaseController;

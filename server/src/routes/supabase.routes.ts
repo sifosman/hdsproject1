@@ -1,5 +1,20 @@
 import express, { Request, Response } from 'express';
+import multer from 'multer';
 import supabaseController from '../controllers/supabase.controller';
+
+// Configure multer for memory storage (buffer)
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, callback) => {
+    if (file.mimetype === 'application/pdf') {
+      callback(null, true);
+    } else {
+      callback(new Error('Only PDF files are allowed'));
+    }
+  }
+});
 
 const router = express.Router();
 
@@ -48,6 +63,21 @@ router.get('/materials/options', function(req: Request, res: Response) {
 // Get all product descriptions for material dropdown
 router.get('/products/descriptions', function(req: Request, res: Response) {
   supabaseController.getProductDescriptions(req, res);
+});
+
+// Get product pricing by description (new endpoint for material dropdown)
+router.get('/products/pricing', function(req: Request, res: Response) {
+  supabaseController.getProductPricingByDescription(req, res);
+});
+
+// Get branch by trading_as value
+router.get('/branches/by-trading-as/:tradingAs', function(req: Request, res: Response) {
+  supabaseController.getBranchByTradingAs(req, res);
+});
+
+// Upload quote PDF to storage
+router.post('/quotes/pdf', upload.single('pdf'), function(req: Request, res: Response) {
+  supabaseController.uploadQuotePdf(req, res);
 });
 
 export default router;

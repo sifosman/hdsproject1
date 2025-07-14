@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendWhatsAppConfirmation = exports.processImageWithOCR = exports.getAvailableStockPieces = exports.getAvailableMaterials = exports.syncProjectWithBotsailor = exports.sendDataToBotsailor = exports.processIncomingData = exports.checkConnectionStatus = void 0;
+exports.sendWhatsAppConfirmation = exports.parseOCRText = exports.processImageWithOCR = exports.getAvailableStockPieces = exports.getAvailableMaterials = exports.syncProjectWithBotsailor = exports.sendDataToBotsailor = exports.processIncomingData = exports.checkConnectionStatus = void 0;
 const axios_1 = __importDefault(require("axios"));
 const uuid_1 = require("uuid");
 const fs_1 = __importDefault(require("fs"));
@@ -240,7 +240,7 @@ const processImageWithOCR = (imagePath) => __awaiter(void 0, void 0, void 0, fun
       2440 x 1220 1pc
     `;
         // Process the extracted text to identify cutting list items
-        const extractedData = parseOCRText(mockText);
+        const extractedData = (0, exports.parseOCRText)(mockText);
         return extractedData;
     }
     catch (error) {
@@ -255,6 +255,8 @@ exports.processImageWithOCR = processImageWithOCR;
  * @returns Structured cutting list data
  */
 const parseOCRText = (text) => {
+    console.log('Starting OCR text parsing...');
+    console.log('Raw text received for parsing:\n', text);
     // Initialize result structure
     const result = {
         stockPieces: [],
@@ -262,81 +264,92 @@ const parseOCRText = (text) => {
         materials: [],
         unit: 'mm' // Default unit
     };
-    // Split text into lines
-    const lines = text.split('\n').filter(line => line.trim().length > 0);
-    // Try to identify the unit of measurement
-    if (text.toLowerCase().includes('inch') || text.includes('"')) {
-        result.unit = 'in';
-    }
-    // Regular expressions for matching dimensions
-    const dimensionRegex = /(\d+(?:\.\d+)?)\s*[x×X]\s*(\d+(?:\.\d+)?)/;
-    const quantityRegex = /(\d+)\s*(?:pcs|pieces|pc|piece)/i;
-    // Process each line
-    lines.forEach(line => {
-        // Skip header lines or empty lines
-        if (line.toLowerCase().includes('cutting list') ||
-            line.toLowerCase().includes('header') ||
-            line.trim() === '') {
-            return;
-        }
-        // Try to extract dimensions
-        const dimensionMatch = line.match(dimensionRegex);
-        if (dimensionMatch) {
-            const width = parseFloat(dimensionMatch[1]);
-            const length = parseFloat(dimensionMatch[2]);
-            // Try to extract quantity
-            let quantity = 1;
-            const quantityMatch = line.match(quantityRegex);
-            if (quantityMatch) {
-                quantity = parseInt(quantityMatch[1]);
-            }
-            // Determine if it's a stock piece or cut piece
-            // Typically, larger dimensions are stock pieces
-            if (width > 1000 || length > 1000) {
-                result.stockPieces.push({
-                    width,
-                    length,
-                    quantity,
-                    id: `sp-${result.stockPieces.length + 1}`,
-                    material: 'default'
-                });
-            }
-            else {
-                result.cutPieces.push({
-                    width,
-                    length,
-                    quantity,
-                    id: `cp-${result.cutPieces.length + 1}`,
-                    name: `Part ${result.cutPieces.length + 1}`
-                });
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+    console.log(`Processing ${lines.length} lines of text...`);
+    // More robust regex patterns to find dimensions and quantities
+    const dimensionPatterns = [
+        // Pattern 1: 1000x500=2, 1000 x 500 = 2, 1000*500=2, etc.
+        /(\d+)\s*[xX×*]\s*(\d+)\s*[=\-\s]\s*(\d+)/,
+        // Pattern 2: 1000x500 (2), 1000 x 500 (2)
+        /(\d+)\s*[xX×*]\s*(\d+)\s*\((\d+)\)/,
+        // Pattern 3: 1000x500 2pcs, 1000x500 2 pc, etc.
+        /(\d+)\s*[xX×*]\s*(\d+)\s+(\d+)\s*(?:pcs?|pieces?|pce|szt|x)/i,
+        // Pattern 4: 1000x500, quantity is on the same line but separated
+        /(\d+)\s*[xX×*]\s*(\d+)/, // fallback no qty
+    ];
+    lines.forEach((line, index) => {
+        var _a, _b;
+        console.log(`Parsing line ${index + 1}: "${line}"`);
+        let matched = false;
+        let width = 0, length = 0, quantity = 0; // Initialize quantity to 0
+        for (const pattern of dimensionPatterns) {
+            const match = line.match(pattern);
+            if (match) {
+                width = parseInt(match[1]);
+                length = parseInt(match[2]);
+                // Use the third capturing group for quantity if it exists
+                quantity = match[3] ? parseInt(match[3]) : 0;
+                if (!isNaN(width) && !isNaN(length) && width > 0 && length > 0) {
+                    console.log(`Pattern matched: ${pattern}. Width=${width}, Length=${length}, Quantity=${quantity}`);
+                    // If quantity is still 0, try to find it in the rest of the string
+                    if (quantity === 0) {
+                        const remainder = line.substring(match[0].length).trim();
+                        console.log(`No quantity in main pattern. Checking remainder: "${remainder}"`);
+                        const quantityMatch = remainder.match(/([0-9]+)/);
+                        if (quantityMatch && quantityMatch[1]) {
+                            quantity = parseInt(quantityMatch[1]);
+                            console.log(`Found quantity in remainder: ${quantity}`);
+                        }
+                    }
+                    matched = true;
+                    break; // Exit loop once a pattern matches
+                }
             }
         }
+        // If a dimension was found, add it to the cut pieces
+        // Fallback: if no pattern matched, try simple numeric extraction
+        if (!matched) {
+            const nums = (_a = line.match(/\d+/g)) === null || _a === void 0 ? void 0 : _a.map(n => parseInt(n));
+            if (nums && nums.length >= 2) {
+                width = nums[0];
+                length = nums[1];
+                quantity = (_b = nums[2]) !== null && _b !== void 0 ? _b : 1;
+                matched = true;
+                console.log(`Fallback numeric parse -> width ${width}, length ${length}, quantity ${quantity}`);
+            }
+        }
+        if (matched && width > 0 && length > 0) {
+            // If quantity is still not found, default to 1 as a last resort.
+            if (quantity === 0) {
+                quantity = 1;
+                console.log('Quantity not found, defaulting to 1.');
+            }
+            result.cutPieces.push({
+                id: (0, uuid_1.v4)(),
+                width,
+                length,
+                quantity,
+                name: `Piece ${result.cutPieces.length + 1}`,
+                description: line // Store the original line for reference
+            });
+            console.log(`Added cut piece: ${width}x${length}, Qty: ${quantity}`);
+        }
+        else {
+            console.log(`No valid dimension found in line: "${line}"`);
+        }
     });
-    // If no stock pieces were found but cut pieces were, add a default stock piece
-    if (result.stockPieces.length === 0 && result.cutPieces.length > 0) {
-        result.stockPieces.push({
-            width: 2440,
-            length: 1220,
-            quantity: 1,
-            id: 'sp-default',
-            material: 'default'
-        });
-    }
-    // Add a default material
-    result.materials.push({
-        id: 'default',
-        name: 'Default Material',
-        type: 'board',
-        thickness: 18
-    });
+    console.log('Finished OCR text parsing.');
+    console.log('Final extracted data:', JSON.stringify(result, null, 2));
     return result;
 };
+exports.parseOCRText = parseOCRText;
 /**
  * Send WhatsApp confirmation message with the extracted cutting list data
  * @param phoneNumber The customer's phone number
  * @param extractedData The extracted cutting list data
  * @param customerName The customer's name
  * @param projectName The project name
+ * @returns WhatsApp message sending result
  */
 const sendWhatsAppConfirmation = (phoneNumber, extractedData, customerName, projectName) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -470,7 +483,7 @@ exports.sendWhatsAppConfirmation = sendWhatsAppConfirmation;
 const formatWhatsAppMessage = (data, customerName, projectName) => {
     // Log the incoming data structure
     console.log('Data structure received in formatWhatsAppMessage:', JSON.stringify(data));
-    let message = `Hello ${customerName},\n\n`;
+    let message = `Hello`;
     // Check if we have a cutlist URL (new approach with web link)
     if (data.cutlistUrl) {
         const dimensionsCount = data.dimensionsCount || (data.dimensions ? data.dimensions.length : 0);

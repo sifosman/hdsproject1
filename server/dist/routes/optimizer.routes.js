@@ -41,10 +41,12 @@ const optimizerController = __importStar(require("../controllers/optimizer.contr
 const router = express_1.default.Router();
 // POST optimize a cutting layout
 router.post('/optimize', optimizerController.optimizeCutting);
+// POST import IQ data
+router.post('/import-iq', optimizerController.importIQData);
+// POST generate quotes with optimization, pricing, and PDF
+router.post('/quote', optimizerController.generateQuote);
 // GET download a PDF result
 router.get('/pdf/:id', optimizerController.downloadPdf);
 // POST export IQ data
 router.post('/export-iq', optimizerController.exportIQData);
-// POST import IQ data
-router.post('/import-iq', optimizerController.importIQData);
 exports.default = router;

@@ -16,6 +16,7 @@ import n8nRoutes from './routes/n8n.routes';
 import webhookDirectRoutes from './routes/webhook-direct.routes';
 import debugRoutes from './routes/debug.routes';
 import supabaseRoutes from './routes/supabase.routes';
+import { diagnosticRoutes } from './routes/diagnostic.routes';
 
 // Load environment variables
 dotenv.config();
@@ -49,6 +50,7 @@ app.use('/api/webhook', webhookDirectRoutes);
 app.use('/api/debug', debugRoutes);
 app.use('/api/iqretail', iqretailRoutes);
 app.use('/api/supabase', supabaseRoutes);
+app.use('/api/diagnostic', diagnosticRoutes);
 
 // Direct test endpoint for n8n integration
 app.get('/api/direct-test', (req, res) => {

@@ -13,14 +13,19 @@ import {
   Link,
   useTheme,
   useMediaQuery,
-  Tabs,
-  Tab,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
-  IconButton
+  IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormHelperText,
+  Tabs,
+  Tab
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -28,6 +33,8 @@ import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import CheckIcon from '@mui/icons-material/Check';
 import HomeIcon from '@mui/icons-material/Home';
 import EditableCutlistTable from '../components/EditableCutlistTable';
+import type { SelectChangeEvent } from '@mui/material';
+import { getBranchByTradingAs } from '../services/api';
 
 interface StockPiece {
   id: string;
@@ -61,6 +68,7 @@ interface CutlistData {
   customerName?: string;
   projectName?: string;
   isConfirmed?: boolean; // To track confirmation status from backend eventually
+  rawText?: string; // Added rawText field
 }
 
 const CutlistEdit: React.FC = () => {
@@ -68,9 +76,21 @@ const CutlistEdit: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  
-  const [cutlistData, setCutlistData] = useState<CutlistData | null>(null);
-  const [loading, setLoading] = useState(true);
+
+  // If id is 'new' or undefined, treat as new cutlist
+  const isNewCutlist = !id || id === 'new';
+
+  const emptyCutlistData: CutlistData = {
+    stockPieces: [],
+    cutPieces: [],
+    materials: [],
+    unit: 'mm',
+    customerName: '',
+    projectName: ''
+  };
+
+  const [cutlistData, setCutlistData] = useState<CutlistData | null>(isNewCutlist ? emptyCutlistData : null);
+  const [loading, setLoading] = useState(!isNewCutlist);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
@@ -79,6 +99,67 @@ const CutlistEdit: React.FC = () => {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [isDataConfirmed, setIsDataConfirmed] = useState(false); // Local confirmation state
   
+  // Branch selection state
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
+  const [selectedBranchData, setSelectedBranchData] = useState<any | null>(null);
+  const [branches] = useState([
+    { trading_as: "HDS Alberton" },
+    { trading_as: "HDS Bloemfontein" },
+    { trading_as: "HDS Brits" },
+    { trading_as: "HDS Burgersfort" },
+    { trading_as: "HDS Church Street" },
+    { trading_as: "HDS De Deur" },
+    { trading_as: "HDS Empangeni" },
+    { trading_as: "HDS Hammanskraal" },
+    { trading_as: "HDS Klerksdorp" },
+    { trading_as: "HDS Krugersdorp" },
+    { trading_as: "HDS Kya Sands" },
+    { trading_as: "HDS Ladysmith" },
+    { trading_as: "HDS Louis Trichardt" },
+    { trading_as: "HDS Mafikeng" },
+    { trading_as: "HDS Main Reef" },
+    { trading_as: "HDS Marula" },
+    { trading_as: "HDS Nelspruit" },
+    { trading_as: "HDS Newcastle" },
+    { trading_as: "HDS PMB" },
+    { trading_as: "HDS PMB Express" },
+    { trading_as: "HDS Secunda" },
+    { trading_as: "HDS South Coast" },
+    { trading_as: "HDS Soweto" },
+    { trading_as: "HDS Springs" },
+    { trading_as: "HDS Sunderland" },
+    { trading_as: "HDS Tembisa" },
+    { trading_as: "HDS Vanderbijlpark" },
+    { trading_as: "HDS Waltloo" },
+    { trading_as: "HDS Welkom" },
+    { trading_as: "HDS Witbank" },
+    { trading_as: "HDS Wynberg" },
+    { trading_as: "Studio Cut & Edge" }
+  ]);
+  
+  // Fetch full branch data when selectedBranch changes
+  useEffect(() => {
+    const fetchBranchData = async () => {
+      if (selectedBranch) {
+        try {
+          const data = await getBranchByTradingAs(selectedBranch);
+          if (data && data.success && data.data) {
+            setSelectedBranchData(data.data);
+          } else {
+            setSelectedBranchData(null);
+            showSnackbar('Branch not found in database', 'warning');
+          }
+        } catch (err) {
+          setSelectedBranchData(null);
+          showSnackbar('Failed to fetch branch data', 'error');
+        }
+      } else {
+        setSelectedBranchData(null);
+      }
+    };
+    fetchBranchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranch]);
   const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
     setSnackbarMessage(message);
     setSnackbarSeverity(severity);
@@ -86,6 +167,12 @@ const CutlistEdit: React.FC = () => {
   }, []); // Empty array as setters are stable
 
   const fetchCutlistData = useCallback(async () => {
+    if (isNewCutlist) {
+      setCutlistData(emptyCutlistData);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (!id) {
       setError('No cutlist ID provided');
       showSnackbar('No cutlist ID provided', 'error');
@@ -127,14 +214,10 @@ const CutlistEdit: React.FC = () => {
       };
       
       const safeData: CutlistData = {
-        _id: rawCutlist._id,
-        stockPieces: ensureIds(rawCutlist.stockPieces || [], 'sp'),
+        ...rawCutlist,
+        rawText: rawCutlist.ocrText, // Explicitly map ocrText to rawText
         cutPieces: ensureIds(rawCutlist.cutPieces || [], 'cp'),
-        materials: ensureIds(rawCutlist.materials || [], 'mat'),
-        unit: rawCutlist.unit || 'mm',
-        customerName: rawCutlist.customerName || '',
-        projectName: rawCutlist.projectName || '',
-        isConfirmed: rawCutlist.isConfirmed || false, // Check for confirmed status from backend
+        stockPieces: ensureIds(rawCutlist.stockPieces || [], 'sp'),
       };
       
       console.log('Safe data object created:', JSON.stringify(safeData, null, 2));
@@ -285,53 +368,19 @@ const CutlistEdit: React.FC = () => {
         // await handleSaveCutlist(updatedData); 
     }
     showSnackbar('Cutlist data confirmed successfully!', 'success');
-    // Potentially disable further edits or show a clear visual indicator
   };
   
   return (
     <Container maxWidth="md" sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', py: 3 }}>
-      {/* Breadcrumbs and Header - Always Visible */}
-      <Breadcrumbs aria-label="breadcrumb" sx={{ mb: 2 }}>
-        <Link component={RouterLink} to="/cutlists" color="inherit" sx={{ display: 'flex', alignItems: 'center' }}>
-          <HomeIcon sx={{ mr: 0.5 }} fontSize="inherit" />
-          Cutlists
-        </Link>
-        <Typography color="text.primary">Edit</Typography>
-      </Breadcrumbs>
-
+      {/* Simple header with just the title - no breadcrumbs or buttons */}
       <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: { xs: 'flex-start', sm: 'center' }, 
-        flexDirection: { xs: 'column', sm: 'row' },
         mb: 3,
         p: 2,
         borderBottom: `1px solid ${theme.palette.divider}`
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <IconButton onClick={handleBack} sx={{ mr: 1 }}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant={isMobile ? "h6" : "h5"} component="h1">
-            Edit Cutlist {id ? `(${id.substring(0, 6)}...)` : ''}
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, mt: isMobile ? 1 : 0 }}>
-            <Button
-                variant="contained"
-                color="secondary"
-                startIcon={<CheckIcon />}
-                onClick={handleOpenConfirmDialog}
-                disabled={loading || saving || isDataConfirmed || !cutlistData}
-                sx={{ 
-                  whiteSpace: 'nowrap',
-                  width: { xs: '100%', sm: 'auto' },
-                  mt: { xs: 2, sm: 0 } 
-                }}
-            >
-                {isDataConfirmed ? 'Confirmed' : 'Confirm Cutlist'}
-            </Button>
-        </Box>
+        <Typography variant={isMobile ? "h6" : "h5"} component="h1" align="center">
+          HDS Cutlist Quotation
+        </Typography>
       </Box>
 
       {/* Conditional Content Area - Below Header */}
@@ -347,8 +396,27 @@ const CutlistEdit: React.FC = () => {
           <Typography variant="h6">Error Loading Cutlist</Typography>
           {error}
           <Button onClick={fetchCutlistData} variant="outlined" sx={{mt: 2, ml:1}}>Try Again</Button>
-          <Button onClick={handleBack} variant="outlined" sx={{mt: 2, ml:1}}>Go Back</Button>
         </Alert>
+      )}
+
+      {/* Branch Dropdown - Required Validation */}
+      {!loading && !error && (
+        <Box sx={{ p: 3, pb: 0 }}>
+          <FormControl fullWidth required error={!selectedBranch} sx={{ mb: 2 }}>
+            <InputLabel>Select your branch</InputLabel>
+            <Select
+              value={selectedBranch}
+              label="Select your branch"
+              onChange={e => setSelectedBranch(e.target.value)}
+              disabled={isDataConfirmed}
+            >
+              {branches.map(branch => (
+                <MenuItem key={branch.trading_as} value={branch.trading_as}>{branch.trading_as}</MenuItem>
+              ))}
+            </Select>
+            {!selectedBranch && <FormHelperText>Branch is required</FormHelperText>}
+          </FormControl>
+        </Box>
       )}
 
       {!loading && !error && cutlistData && (
@@ -370,65 +438,24 @@ const CutlistEdit: React.FC = () => {
               indicatorColor="primary"
               variant={isMobile ? "fullWidth" : "standard"}
             >
-              <Tab label={`${cutlistData.projectName || cutlistData.customerName || 'Cutlist'} Details`} id="cutlist-tab-0" />
+              <Tab label="Edit Cutlist" />
             </Tabs>
           </Box>
-          <Box sx={{ p: isMobile ? 2 : 3, width: '100%' }}>
-            <EditableCutlistTable
-              initialData={cutlistData}
-              onSave={handleSaveCutlist}
-              isConfirmed={isDataConfirmed}
-              isMobile={isMobile}
-            />
-          </Box>
+
+          {/* Editable Cutlist Table - Pass validation prop */}
+          <EditableCutlistTable
+            initialData={cutlistData}
+            onSave={handleSaveCutlist}
+            onSendWhatsApp={handleSendWhatsApp}
+            isMobile={isMobile}
+            isConfirmed={isDataConfirmed}
+            branchData={selectedBranchData}
+            requireMaterialValidation={true}
+          />
         </Paper>
       )}
-      
-      {!loading && !error && !cutlistData && (
-         <Paper elevation={3} sx={{ p: 3, mb: 4, mt: 3, textAlign: 'center' }}>
-            <Typography color="textSecondary">No cutlist data available.</Typography>
-            <Button onClick={fetchCutlistData} variant="outlined" sx={{mt: 2}}>Try Reloading</Button>
-          </Paper>
-      )}
-
-
-      {/* Dialogs and Snackbars - Positioned at the end of the container is fine */}
-      <Dialog
-        open={confirmDialogOpen}
-        onClose={handleConfirmDialogClose}
-        aria-labelledby="confirm-dialog-title"
-        aria-describedby="confirm-dialog-description"
-      >
-        <DialogTitle id="confirm-dialog-title">
-          Confirm Cutlist Data
-        </DialogTitle>
-        <DialogContent>
-          <DialogContentText id="confirm-dialog-description">
-            Are you sure you want to confirm this cutlist? Once confirmed, this typically finalizes the data.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleConfirmDialogClose} color="primary">
-            Cancel
-          </Button>
-          <Button onClick={handleConfirmDialogConfirm} color="primary" variant="contained" autoFocus>
-            Confirm Data
-          </Button>
-        </DialogActions>
-      </Dialog>
-      
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleSnackbarClose}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={handleSnackbarClose} severity={snackbarSeverity} sx={{ width: '100%' }}>
-          {snackbarMessage}
-        </Alert>
-      </Snackbar>
     </Container>
   );
-};
+}
 
 export default CutlistEdit;

@@ -45,6 +45,12 @@ export const optimizeCutting = async (data: any): Promise<any> => {
   return response.data;
 };
 
+// Generate a complete quote with optimization, pricing, and PDF
+export const generateQuote = async (quoteData: any): Promise<any> => {
+  const response = await api.post('/optimizer/quote', quoteData);
+  return response.data;
+};
+
 export const getPdfUrl = (pdfId: string) => {
   return `${API_URL}/optimizer/pdf/${pdfId}`;
 };
@@ -128,15 +134,28 @@ export const getProductPricing = async (materialName: string): Promise<any> => {
 // Get all product descriptions from the database
 export const getAllProductDescriptions = async (): Promise<string[]> => {
   try {
+    console.log('Fetching product descriptions from API...');
     const response = await api.get('/supabase/products/descriptions');
+    console.log('API response:', response.data);
+    
     if (response.data.success && Array.isArray(response.data.data)) {
-      return response.data.data.map((product: any) => product.description);
+      const descriptions = response.data.data.map((product: any) => product.description);
+      console.log(`Found ${descriptions.length} product descriptions:`, descriptions);
+      return descriptions;
     }
+    
+    console.warn('No product descriptions found in API response:', response.data);
     return [];
   } catch (error) {
     console.error('Error fetching product descriptions:', error);
     return [];
   }
+};
+
+// Branch data endpoint
+export const getBranchByTradingAs = async (tradingAs: string): Promise<any> => {
+  const response = await api.get(`/supabase/branches/by-trading-as/${encodeURIComponent(tradingAs)}`);
+  return response.data;
 };
 
 export default api;

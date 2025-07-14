@@ -64,7 +64,7 @@ const SupabaseService = {
         });
     },
     /**
-     * Get product pricing by product code
+     * Get product pricing by product code (legacy method)
      */
     getProductPricing(productCode) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -93,6 +93,127 @@ const SupabaseService = {
             }
             catch (error) {
                 console.error(`Error in getProductPricing for ${productCode}:`, error);
+                return { success: false, error: error.message };
+            }
+        });
+    },
+    /**
+     * Get product pricing by description from hds_prices table
+     */
+    getProductPricingByDescription(description_1) {
+        return __awaiter(this, arguments, void 0, function* (description, includeSizes = false) {
+            try {
+                console.log(`Fetching product pricing for description: "${description}" from hds_prices table`);
+                // Select columns based on whether dimensions are needed
+                let selectColumns = 'description, price';
+                if (includeSizes) {
+                    selectColumns = 'description, price, dimensions'; // Include dimensions column if requested
+                }
+                // Log the exact query we're about to run for debugging
+                console.log(`Running exact match query on 'hds_prices' table for description: "${description}"`);
+                console.log(`Select columns: ${selectColumns}`);
+                // First try an exact match
+                let { data, error } = yield supabase
+                    .from('hds_prices')
+                    .select(selectColumns)
+                    .eq('description', description.trim());
+                // If no match, try with explicit column ILIKE for an exact match (handles case insensitivity)
+                if (!data || data.length === 0 || error) {
+                    console.log(`No exact match with .eq(), trying with .ilike() for exact match...`);
+                    ({ data, error } = yield supabase
+                        .from('hds_prices')
+                        .select(selectColumns)
+                        .ilike('description', description.trim()));
+                }
+                // If no exact match or direct ILIKE match, try an exact phrase LIKE search
+                if (!data || data.length === 0 || error) {
+                    console.log(`No exact or case-insensitive match, trying exact phrase with wildcards...`);
+                    // Surround with % to find the exact phrase anywhere in the description
+                    const exactPhrasePattern = `%${description.trim()}%`;
+                    ({ data, error } = yield supabase
+                        .from('hds_prices')
+                        .select(selectColumns)
+                        .ilike('description', exactPhrasePattern)
+                        .order('description', { ascending: true }));
+                }
+                // If still no match, try a partial match using ILIKE with keywords
+                if (!data || data.length === 0 || error) {
+                    console.log(`No exact phrase match found for "${description}", trying keyword partial match...`);
+                    const materialKeywords = description.split(' ');
+                    // Try to match the first two words which are usually the material type
+                    const searchPattern = `%${materialKeywords[0]}%${materialKeywords[1] || ''}%`;
+                    ({ data, error } = yield supabase
+                        .from('hds_prices')
+                        .select(selectColumns)
+                        .ilike('description', searchPattern)
+                        .order('description', { ascending: true }));
+                }
+                if (error) {
+                    console.error(`Error fetching product details for pricing:`, error);
+                    return { success: false, error: error.message };
+                }
+                if (!data || data.length === 0) {
+                    return { success: false, error: `Product pricing not found for "${description}"` };
+                }
+                // Make sure data is an array to avoid TypeScript errors
+                if (!data || !Array.isArray(data) || data.length === 0) {
+                    // If we got here with no results, try an even looser match
+                    console.log(`No results found for "${description}", trying looser match...`);
+                    // Try a looser match with just the first word
+                    const firstWord = description.split(' ')[0];
+                    const looseSearchPattern = `%${firstWord}%`;
+                    try {
+                        const looseResult = yield supabase
+                            .from('hds_prices')
+                            .select(selectColumns)
+                            .ilike('description', looseSearchPattern)
+                            .order('description', { ascending: true });
+                        if (looseResult.error) {
+                            console.error('Error in loose search:', looseResult.error);
+                            return { success: false, error: `No matching product found for "${description}"` };
+                        }
+                        if (!looseResult.data || looseResult.data.length === 0) {
+                            return { success: false, error: `No matching product found for "${description}"` };
+                        }
+                        // Use the loose search results
+                        data = looseResult.data;
+                        console.log(`Found ${data.length} matches with loose search`);
+                    }
+                    catch (error) {
+                        console.error('Error in loose search:', error);
+                        return { success: false, error: `No matching product found for "${description}"` };
+                    }
+                }
+                // Safe to work with data as an array now
+                // If multiple matches found, log them for debugging
+                if (data.length > 1) {
+                    const descriptions = data.map((item) => {
+                        return typeof (item === null || item === void 0 ? void 0 : item.description) === 'string' ? item.description : '';
+                    });
+                    console.log(`Found ${data.length} potential matches:`, descriptions.join(', '));
+                }
+                // Use the first match
+                const matchedProduct = data[0];
+                console.log(`Using product match: ${JSON.stringify(matchedProduct)}`);
+                // Extract fields with proper type checking
+                const productDescription = typeof (matchedProduct === null || matchedProduct === void 0 ? void 0 : matchedProduct.description) === 'string' ? matchedProduct.description : description;
+                const productPrice = typeof (matchedProduct === null || matchedProduct === void 0 ? void 0 : matchedProduct.price) === 'number' ? matchedProduct.price : 0;
+                const productDimensions = typeof (matchedProduct === null || matchedProduct === void 0 ? void 0 : matchedProduct.dimensions) === 'string' ? matchedProduct.dimensions : null;
+                // Return the data with transformed field names
+                return {
+                    success: true,
+                    data: {
+                        description: productDescription,
+                        price: productPrice,
+                        sizes: productDimensions, // We keep using 'sizes' as the field name in the returned object for compatibility
+                        unit: 'piece' // Default unit
+                    }
+                };
+                // If we get here, no matching product was found
+                return { success: false, error: `No matching product found for "${description}"` };
+            }
+            catch (error) {
+                console.error(`Error in getProductPricingByDescription for "${description}":`, error);
                 return { success: false, error: error.message };
             }
         });
@@ -297,6 +418,18 @@ const SupabaseService = {
     getProductDescriptions() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                // Specifically log the table name we're querying
+                console.log('Fetching product descriptions from hds_prices table...');
+                // First verify if the table exists
+                const { data: tablesData, error: tablesError } = yield supabase
+                    .rpc('get_tables');
+                if (tablesError) {
+                    console.error('Error checking tables:', tablesError);
+                }
+                else {
+                    console.log('Available tables in Supabase:', tablesData);
+                }
+                // Force use of hds_prices table
                 const { data, error } = yield supabase
                     .from('hds_prices')
                     .select('description')
@@ -306,8 +439,10 @@ const SupabaseService = {
                     return { success: false, error: error.message };
                 }
                 if (!data || data.length === 0) {
+                    console.warn('No product descriptions found in hds_prices table');
                     return { success: false, error: 'No product descriptions found' };
                 }
+                console.log(`Found ${data.length} product descriptions from database:`, data.map(item => item.description));
                 return {
                     success: true,
                     data: data
@@ -408,6 +543,144 @@ const SupabaseService = {
                 return { success: false, error: error.message };
             }
         });
-    }
+    },
+    /**
+     * Fetch quote by ID
+     * @param quoteId The ID of the quote to fetch
+     * @returns Promise with quote data
+     */
+    fetchQuoteById(quoteId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const { data, error } = yield supabase
+                    .from('quotes')
+                    .select('*')
+                    .eq('quote_id', quoteId)
+                    .single();
+                if (error) {
+                    console.error(`Error fetching quote with ID ${quoteId}:`, error);
+                    return { success: false, error: error.message };
+                }
+                if (!data) {
+                    return { success: false, error: 'Quote not found' };
+                }
+                return { success: true, data };
+            }
+            catch (error) {
+                console.error(`Error in fetchQuoteById for ${quoteId}:`, error);
+                return { success: false, error: error.message };
+            }
+        });
+    },
+    /**
+     * Update the PDF URL for a quote
+     * @param quoteId The ID of the quote to update
+     * @param pdfUrl The new PDF URL
+     * @returns Promise with updated quote data
+     */
+    updateQuotePdfUrl(quoteId, pdfUrl) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const { data, error } = yield supabase
+                    .from('quotes')
+                    .update({ pdf_url: pdfUrl, updated_at: new Date().toISOString() })
+                    .eq('quote_id', quoteId)
+                    .select()
+                    .single();
+                if (error) {
+                    console.error(`Error updating PDF URL for quote ${quoteId}:`, error);
+                    return { success: false, error: error.message };
+                }
+                return { success: true, data };
+            }
+            catch (error) {
+                console.error(`Error in updateQuotePdfUrl for ${quoteId}:`, error);
+                return { success: false, error: error.message };
+            }
+        });
+    },
+    /**
+     * Upload a PDF buffer to the Supabase hdsquotes bucket
+     * @param fileBuffer The PDF file buffer
+     * @param fileName The name for the uploaded file
+     * @returns Promise with the public URL or an error
+     */
+    uploadQuotePdf(fileBuffer, fileName) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const { error: uploadError } = yield supabase.storage
+                    .from('hdsquotes') // Assumes a bucket named 'quotes'
+                    .upload(fileName, fileBuffer, {
+                    contentType: 'application/pdf',
+                    upsert: true, // Overwrite if file exists
+                });
+                if (uploadError) {
+                    console.error('Error uploading PDF to Supabase Storage:', uploadError);
+                    return { success: false, error: uploadError.message };
+                }
+                const { data: urlData } = supabase.storage
+                    .from('hdsquotes')
+                    .getPublicUrl(fileName);
+                if (!urlData.publicUrl) {
+                    return { success: false, error: 'Could not retrieve public URL for PDF.' };
+                }
+                return { success: true, publicUrl: urlData.publicUrl };
+            }
+            catch (error) {
+                console.error('Error in uploadQuotePdf:', error);
+                return { success: false, error: error.message };
+            }
+        });
+    },
+    /**
+     * Get branch by trading_as value from branches table
+     */
+    getBranchByTradingAs: (tradingAs) => __awaiter(void 0, void 0, void 0, function* () {
+        try {
+            const { data, error } = yield supabase
+                .from('branches')
+                .select('*')
+                .eq('trading_as', tradingAs)
+                .single();
+            if (error) {
+                console.error(`Error fetching branch with trading_as ${tradingAs}:`, error);
+                return { success: false, error: error.message };
+            }
+            if (!data) {
+                return { success: false, error: 'Branch not found' };
+            }
+            return { success: true, data };
+        }
+        catch (error) {
+            console.error(`Error in getBranchByTradingAs for ${tradingAs}:`, error);
+            return { success: false, error: error.message };
+        }
+    }),
+    /**
+     * Get banking details by fx_branch (match to trading_as of selected branch)
+     */
+    getBankingDetailsByBranch(fxBranch) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const { data, error } = yield supabase
+                    .from('banking_details')
+                    .select('*')
+                    .eq('fx_branch', fxBranch)
+                    .single();
+                if (error) {
+                    console.error(`Error fetching banking details for fx_branch ${fxBranch}:`, error);
+                    return { success: false, error: error.message };
+                }
+                if (!data) {
+                    return { success: false, error: 'Banking details not found' };
+                }
+                return { success: true, data };
+            }
+            catch (error) {
+                console.error(`Error in getBankingDetailsByBranch for ${fxBranch}:`, error);
+                return { success: false, error: error.message };
+            }
+        });
+    },
 };
 exports.default = SupabaseService;

@@ -95,8 +95,8 @@ const Header = () => {
                 edge="start"
                 color="inherit"
                 aria-label="menu"
-                onClick={toggleDrawer(true)}
-                sx={{ mr: 2 }}
+                disabled
+                sx={{ mr: 2, opacity: 0.5, pointerEvents: 'none' }}
               >
                 <MenuIcon />
               </IconButton>

@@ -35,12 +35,25 @@ export const extractDimensionsFromText = (ocrText: string): { dimensions: Dimens
   // Log the full OCR text for debugging
   console.log('Full OCR text:', ocrText);
   
-  // Simplified regex patterns focused on common dimension formats
+  // Enhanced regex patterns focused on real-world OCR text formats
   const dimensionPatterns = [
-    /(\d+)\s*[xX]\s*(\d+)\s*=\s*(\d+)/, // 1000x500=2
-    /(\d+)\s*[xX]\s*(\d+)\s+(\d+)/, // 1000x500 2
-    /(\d+)\s*[xX×-]\s*(\d+)\s*=?\s*(\d+)?/, // General pattern with optional quantity
+    // Format: "2000x 460=2" or "918x460=4" (with equals sign, allows for noise)
+    /(\d+)\s*[xX×*]\s*(\d+)[^\d\r\n]*?=\s*(\d+)/,
+
+    // Format: "360x140-8" (with dash)
+    /(\d+)\s*[xX×*]\s*(\d+)\s*-\s*(\d+)/,
+
+    // Format: "1000x500 2" (space then quantity)
+    /(\d+)\s*[xX×*]\s*(\d+)\s+(\d+)\b/,
+
+    // Format: "500x200 (3)" (quantity in parentheses)
+    /(\d+)\s*[xX×*]\s*(\d+)\s*\(\s*(\d+)\s*\)/,
+
+    // Format: "500x200x4" (quantity after second x)
+    /(\d+)\s*[xX×*]\s*(\d+)\s*[xX×*]\s*(\d+)/,
   ];
+  
+  console.log('Using enhanced dimension patterns for extraction');
   
   // Process each line
   for (let i = 0; i < lines.length; i++) {
@@ -57,56 +70,95 @@ export const extractDimensionsFromText = (ocrText: string): { dimensions: Dimens
     
     // Try to extract dimensions using our patterns
     let matched = false;
+    let width = 0, length = 0, quantity = 0; // Initialize quantity to 0
+    
+    console.log(`Line format analysis for "${line}"`);
     
     // First, try the specific patterns
     for (const pattern of dimensionPatterns) {
       const match = line.match(pattern);
       if (match) {
-        const width = parseInt(match[1]);
-        const length = parseInt(match[2]);
-        let quantity = match[3] ? parseInt(match[3]) : 1;
+        width = parseInt(match[1]);
+        length = parseInt(match[2]);
+        quantity = match[3] ? parseInt(match[3]) : 0;
         
         // Ensure width, length, and quantity are valid numbers
         if (!isNaN(width) && !isNaN(length) && width > 0 && length > 0) {
-          console.log(`  Found dimension: ${width}x${length}, qty=${quantity}`);
-          dimensions.push({
-            id: `dim-${Date.now()}-${dimensions.length}`,
-            width,
-            length,
-            quantity: isNaN(quantity) ? 1 : quantity
-          });
+          console.log(`PATTERN MATCH FOUND: ${width}x${length}, qty=${quantity} using pattern ${pattern}`);
           matched = true;
           break;
         }
       }
     }
     
-    // If not matched with specific patterns, try a more general approach
+    // If not matched with specific patterns, try more targeted approaches
     if (!matched) {
-      // Look for any pattern of numbers with x between them
-      const generalMatch = line.match(/(\d+)\s*[xX×-]\s*(\d+)/);
+      // 1. Extract dimensions first
+      const dimensionMatch = line.match(/(\d+)\s*[xX×*-]\s*(\d+)/);
       
-      if (generalMatch) {
-        const width = parseInt(generalMatch[1]);
-        const length = parseInt(generalMatch[2]);
+      if (dimensionMatch) {
+        width = parseInt(dimensionMatch[1]);
+        length = parseInt(dimensionMatch[2]);
         
-        // Look for a quantity at the end of the line
-        let quantity = 1;
-        const quantityMatch = line.match(/=\s*(\d+)\s*$/) || line.match(/\s(\d+)\s*$/);
-        if (quantityMatch) {
-          quantity = parseInt(quantityMatch[1]);
+        console.log(`  Basic dimension found: ${width}x${length}`);
+        
+        // Get the remainder of the string after the dimension match
+        const remainder = line.substring(dimensionMatch[0].length).trim();
+        console.log(`  Remainder for quantity search: "${remainder}"`);
+
+        // 2. Now try to extract quantity from the remainder
+        const quantityPatterns = [
+          // Format: "=2" or "= 2" at any position
+          /=\s*(\d+)/,
+          
+          // Format: "-2" or "- 2" at any position
+          /-\s*(\d+)/,
+          
+          // Format: a number at the end of line
+          /^(\d+)\s*$/,
+          
+          // Format: "(2)" or "[2]" (quantity in brackets)
+          /[\(\[]\s*(\d+)\s*[\)\]]/,
+          
+          // Format: "2pcs" or "2 pcs" or similar
+          /\b(\d+)\s*(?:pc|pcs|x|ea|each|unit|units|pieces|piece)/i,
+        ];
+        
+        for (const qPattern of quantityPatterns) {
+          const qMatch = remainder.match(qPattern);
+          if (qMatch && qMatch[1]) {
+            quantity = parseInt(qMatch[1]);
+            console.log(`  Quantity found: ${quantity} using pattern ${qPattern}`);
+            matched = true;
+            break;
+          }
         }
         
-        // Add the dimension
-        console.log(`  Found dimension (general): ${width}x${length}, qty=${quantity}`);
-        dimensions.push({
-          id: `dim-${Date.now()}-${dimensions.length}`,
-          width,
-          length,
-          quantity
-        });
-        matched = true;
+        // If no quantity pattern matched but we have dimensions, still consider it matched
+        if (!matched && width > 0 && length > 0) {
+          console.log(`  No quantity pattern matched, skipping dimension`);
+          continue;
+        }
       }
+    }
+    
+    // If we have valid dimensions and a valid quantity, add them to our collection
+    if (matched && width > 0 && length > 0 && quantity > 0) {
+      // Ensure quantity is a valid number
+      if (isNaN(quantity)) {
+        console.log(`  Invalid quantity detected (${quantity}), skipping dimension`);
+        continue; // Skip if quantity is not a number
+      }
+      
+      // Extra logging to confirm what's being added
+      console.log(`ADDING DIMENSION: ${width}x${length}, qty=${quantity}`);
+      
+      dimensions.push({
+        id: `dim-${Date.now()}-${dimensions.length}`,
+        width,
+        length,
+        quantity
+      });
     }
     
     if (!matched) {

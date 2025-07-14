@@ -71,6 +71,8 @@ interface CutPiece {
   length: number;
   quantity: number;
   name?: string;
+  material?: string;
+  separator?: boolean;
 }
 
 interface Material {
@@ -89,43 +91,168 @@ interface CutlistData {
 
 // Parse the OCR text and create cutlist data
 const parseOcrText = (ocrText: string): CutlistData => {
+  // Debug - log the original OCR text
+  console.log('OCR text to parse:', ocrText);
+
   const cutPieces: CutPiece[] = [];
   const stockPieces: StockPiece[] = [];
   const materials: Material[] = [];
-  let currentMaterial = 'White melamme'; // Default material
+  let currentMaterial: string | null = null; // No default material - will be determined from the content
+  let materialSections: Set<string> = new Set();
+  let materialChanged = false;
+  
+  // Define known material headers to match against
+  const knownMaterials = [
+    { key: 'white melamme', value: 'White Melamine' },
+    { key: 'white melamine', value: 'White Melamine' },
+    { key: 'doors', value: 'Doors' },
+    { key: 'door', value: 'Doors' },
+    { key: 'white messonite', value: 'White Messonite' },
+    { key: 'messonite', value: 'White Messonite' },
+    { key: 'color melamine', value: 'Color Melamine' },
+    { key: 'colour melamine', value: 'Color Melamine' },
+  ];
+  
+  // We'll detect materials from the content instead of pre-setting a default
   
   // Split by lines
   const lines = ocrText.split('\n');
   
+  // Log the detected OCR text and lines for debugging
+  console.log('OCR Text Lines:', lines.length, 'lines');
+  console.log('OCR Text Content:', lines);
+  
+  // First pass: identify materials and create pieces
   for (const line of lines) {
-    // Check if this line defines a material
-    if (line.toLowerCase().includes('cutlist:') || line.trim().endsWith(':')) {
-      const materialName = line.split(':')[1]?.trim() || line.replace(':', '').trim();
+    // Check if this line defines a material (explicit with colon or implicit as standalone word)
+    const cleanLine = line.toLowerCase().trim();
+    
+    if (!cleanLine) {
+      // Skip empty lines
+      continue;
+    }
+    
+    let materialChanged = false;
+    
+    // Case 1: Line has explicit 'cutlist:' format
+    if (cleanLine.includes('cutlist:')) {
+      const materialName = line.split(':')[1]?.trim();
       if (materialName) {
-        currentMaterial = materialName;
-        materials.push({
-          id: uuidv4(),
-          name: materialName,
-          type: 'board',
-          thickness: 16 // Default thickness
-        });
+        const normalizedMaterial = normalizeMaterialName(materialName, knownMaterials);
+        console.log('Found material (cutlist format):', materialName, '→', normalizedMaterial);
+        addNewMaterial(normalizedMaterial, materials);
+        // Add separator for this new material if we haven't seen it before
+        if (!materialSections.has(normalizedMaterial)) {
+          addSeparatorForMaterial(normalizedMaterial, cutPieces, materialSections);
+          console.log('Added separator for material:', normalizedMaterial);
+        }
+        currentMaterial = normalizedMaterial;
+        materialChanged = true;
       }
       continue;
     }
     
-    // Check if this is a section header (like "Doors")
-    if (!line.includes('x') && !line.includes('X') && !line.includes('×')) {
-      continue;
+    // Case 2: Check if line is just a material header (no measurements)
+    // A line is likely a material header if it doesn't contain measurement indicators
+    if (!cleanLine.includes('x') && !cleanLine.includes('×') && !cleanLine.includes('=') && !cleanLine.includes('-')) {
+      console.log('Checking if line is a material header:', cleanLine);
+      
+      // Case 2a: Handle standalone number (like "470")
+      if (/^\d+$/.test(cleanLine)) {
+        console.log('Found standalone number:', cleanLine, 'treating as potential dimension');
+        // This could be a partial dimension that goes with a previous or next line
+        // Let's skip for now, may need to handle differently in the future
+        continue;
+      }
+      
+      // Case 2b: Check against known material headers
+      let foundMaterialHeader = false;
+      for (const material of knownMaterials) {
+        if (cleanLine.includes(material.key)) {
+          console.log('Found material header:', material.key, '→', material.value);
+          addNewMaterial(material.value, materials);
+          // Add separator for this new material if we haven't seen it before
+          if (!materialSections.has(material.value)) {
+            addSeparatorForMaterial(material.value, cutPieces, materialSections);
+            console.log('Added separator for material:', material.value);
+          }
+          currentMaterial = material.value;
+          materialChanged = true;
+          foundMaterialHeader = true;
+          break;
+        }
+      }
+      
+      // Case 2c: Treat unknown words without measurements as potential material headers
+      if (!foundMaterialHeader && cleanLine.length > 2 && isNaN(Number(cleanLine))) {
+        console.log('Found potential unlisted material header:', cleanLine);
+        const capitalizedMaterial = cleanLine.replace(/\b\w/g, c => c.toUpperCase());
+        addNewMaterial(capitalizedMaterial, materials);
+        if (!materialSections.has(capitalizedMaterial)) {
+          addSeparatorForMaterial(capitalizedMaterial, cutPieces, materialSections);
+          console.log('Added separator for unlisted material:', capitalizedMaterial);
+        }
+        currentMaterial = capitalizedMaterial;
+        materialChanged = true;
+        foundMaterialHeader = true;
+      }
+      
+      // Only continue if we found a material header
+      if (foundMaterialHeader) {
+        continue;
+      }
     }
     
-    // Parse dimension lines
-    const regex = /(\d+)\s*[xX×]\s*(\d+)\s*=?\s*(\d+)?/;
+    // Parse dimension lines - expanded regex to catch more variants
+    // This handles formats like: 960X140=6, 360x140-8, 997×470=2, 197×7=4, etc.
+    const regex = /(\d+)\s*[xX\u00d7]\s*(\d+)\s*[=\-]?\s*(\d+)?/;
     const match = line.match(regex);
     
     if (match) {
+      // If we haven't found any material yet, create a default material section
+      if (currentMaterial === null) {
+        currentMaterial = 'Material Section 1';
+        console.log('No material detected yet, creating default material section:', currentMaterial);
+        addNewMaterial(currentMaterial, materials);
+        addSeparatorForMaterial(currentMaterial, cutPieces, materialSections);
+      }
+      
+      console.log('Found measurement in line:', line, 'Associating with material:', currentMaterial);
       const length = parseInt(match[1]);
       const width = parseInt(match[2]);
-      const quantity = match[3] ? parseInt(match[3]) : 1;
+      let quantity = 1; // Default
+      
+      // Extract quantity from after the = or - sign if present
+      console.log('Attempting to extract quantity from:', line);
+      console.log('Regex match groups:', match[1], match[2], match[3]);
+      
+      // First try the captured group from the main regex
+      if (match[3] && !isNaN(parseInt(match[3]))) {
+        quantity = parseInt(match[3]);
+        console.log(`SUCCESS: Extracted quantity ${quantity} from match group 3`);
+      } else {
+        // Try alternative patterns for quantity extraction
+        console.log('Match group 3 not available, trying alternative patterns');
+        
+        // Pattern 1: Look for =number or -number
+        const quantityMatch = line.match(/[=\-]\s*(\d+)/);
+        if (quantityMatch && quantityMatch[1]) {
+          quantity = parseInt(quantityMatch[1]);
+          console.log(`SUCCESS: Extracted quantity ${quantity} using =number pattern, value: ${quantityMatch[1]}`);
+        } else {
+          // Pattern 2: Try to find any number at the end of the line
+          const endNumberMatch = line.match(/\s(\d+)\s*$/);
+          if (endNumberMatch && endNumberMatch[1]) {
+            quantity = parseInt(endNumberMatch[1]);
+            console.log(`SUCCESS: Extracted quantity ${quantity} from end of line`);
+          } else {
+            console.log('FAILED: Could not extract quantity, using default:', quantity);
+          }
+        }
+      }
+      
+      // Create a name for the piece based on dimensions
+      const pieceName = `${length}x${width}`;
       
       // Determine if this is likely a stock piece or cut piece based on size
       if (length >= 2000 || width >= 1000) {
@@ -134,25 +261,50 @@ const parseOcrText = (ocrText: string): CutlistData => {
           length,
           width,
           quantity,
-          material: currentMaterial
+          material: currentMaterial,
+          name: `${pieceName} (${currentMaterial})`
         });
+        console.log('Added stock piece:', pieceName, 'with material:', currentMaterial);
       } else {
-        cutPieces.push({
-          id: uuidv4(),
+        console.log(`Creating cut piece with dimensions ${length}x${width} and quantity ${quantity}`);
+        
+        const cutPiece = {
+          id: `cp-${Date.now()}-${cutPieces.length}-${Math.random().toString(36).substr(2, 8)}`,
+          name: pieceName,
+          material: currentMaterial,
           length,
           width,
-          quantity,
-          name: `Part ${cutPieces.length + 1}`
-        });
+          quantity, // Ensure this is the correct quantity we extracted
+          separator: false
+        };
+        
+        console.log('Final cut piece object before pushing:', cutPiece);
+        cutPieces.push(cutPiece);
+        console.log('Added cut piece:', pieceName, 'with material:', currentMaterial);
       }
     }
+  }
+  
+  // Helper function to add separator for a material
+  function addSeparatorForMaterial(materialName: string, pieces: CutPiece[], sections: Set<string>) {
+    pieces.push({
+      id: uuidv4(),
+      name: materialName,
+      separator: true,
+      material: materialName,
+      // Add default values for required fields
+      width: 0,
+      length: 0,
+      quantity: 0
+    });
+    sections.add(materialName);
   }
   
   // If no materials were detected, add the default one
   if (materials.length === 0) {
     materials.push({
       id: uuidv4(),
-      name: 'White melamme',
+      name: 'White Melamine',
       type: 'board',
       thickness: 16
     });
@@ -169,13 +321,45 @@ const parseOcrText = (ocrText: string): CutlistData => {
     });
   }
   
-  return {
+  // Debug - log the final results
+  console.log('Final parsed data:');
+  console.log('- Materials:', materials);
+  console.log('- Cut Pieces:', cutPieces.length, 'pieces', cutPieces.filter(p => !p.separator).length, 'non-separator pieces');
+  console.log('- Material Sections:', materialSections);
+  console.log('- Separator pieces:', cutPieces.filter(p => p.separator).length);
+  
+  const result = {
     cutPieces,
     stockPieces,
     materials,
     unit: 'mm'
   };
+  
+  return result;
 };
+
+// Helper function to normalize material names
+function normalizeMaterialName(name: string, knownMaterials: {key: string; value: string}[]): string {
+  const cleanName = name.toLowerCase().trim();
+  for (const material of knownMaterials) {
+    if (cleanName.includes(material.key)) {
+      return material.value;
+    }
+  }
+  return name; // Return original if no match
+}
+
+// Helper function to add new material if it doesn't exist yet
+function addNewMaterial(materialName: string, materials: Material[]): void {
+  if (!materials.some(m => m.name === materialName)) {
+    materials.push({
+      id: uuidv4(),
+      name: materialName,
+      type: 'board',
+      thickness: 16 // Default thickness
+    });
+  }
+}
 
 const CutlistDemo: React.FC = () => {
   const theme = useTheme();

@@ -20,7 +20,7 @@ const DimensionSchema = new mongoose_1.default.Schema({
     },
     quantity: {
         type: Number,
-        default: 1
+        required: true
     },
     material: {
         type: String

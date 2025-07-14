@@ -7,6 +7,9 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
+// Import our OCR parser module
+const ocrParser = require('./ocr-parser');
+
 // Create Express app
 const app = express();
 
@@ -338,6 +341,9 @@ app.delete('/api/projects/:id', (req, res) => {
   projects.splice(index, 1);
   res.json(project);
 });
+
+// Use the OCR parser router for /api/ocr-parser endpoints
+app.use('/api/ocr-parser', ocrParser);
 
 // Export the Express API for Vercel
 module.exports = app;

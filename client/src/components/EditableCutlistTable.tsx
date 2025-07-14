@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { getMaterialOptions, optimizeCutting, getPdfUrl, getProductPricing, getAllProductDescriptions } from '../services/api';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PRODUCT_DESCRIPTIONS } from '../data/productDescriptions';
+import { getMaterialOptions, optimizeCutting, getPdfUrl, getProductPricing, getAllProductDescriptions, generateQuote } from '../services/api';
 import * as botsailorService from '../services/botsailor';
 import {
   Box,
@@ -33,6 +35,8 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import DownloadIcon from '@mui/icons-material/Download';
+import ShareIcon from '@mui/icons-material/Share';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
@@ -77,6 +81,7 @@ interface CutlistData {
   unit: string;
   customerName?: string;
   projectName?: string;
+  rawText?: string; // OCR text for direct parsing
 }
 
 interface EditableCutlistTableProps {
@@ -85,6 +90,8 @@ interface EditableCutlistTableProps {
   onSendWhatsApp?: (phoneNumber: string, data: CutlistData, customerName?: string, projectName?: string) => void;
   isMobile?: boolean;
   isConfirmed?: boolean;
+  branchData?: any | null;
+  requireMaterialValidation?: boolean;
 }
 
 const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({ 
@@ -92,7 +99,9 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   onSave,
   onSendWhatsApp,
   isMobile,
-  isConfirmed
+  isConfirmed,
+  branchData,
+  requireMaterialValidation = false
 }) => {
   const theme = useTheme();
   
@@ -112,19 +121,175 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     "Doors": { "Neutral": { "Solid": ["Smooth"] } }
   };
   
+  // ------------------------------------------------------------------
+  // Material headings and helper arrays MUST be declared BEFORE they are
+  // referenced by normalizeCutPieces(). Declaring them here avoids the
+  // "Cannot access '<var>' before initialization" runtime error.
+  // Function to directly parse OCR text and extract dimensions and materials
+  const parseOcrText = (ocrText: string | undefined): { dimensions: any[], materials: string[] } => {
+    if (!ocrText) return { dimensions: [], materials: [] };
+    
+    const dimensions: any[] = [];
+    const materials: string[] = [];
+    let currentMaterial = DEFAULT_MATERIAL_CATEGORIES[0];
+    
+    // Split OCR text into lines
+    const lines = ocrText.split('\n').filter(line => line.trim() !== '');
+    console.log(`Parsing ${lines.length} lines of OCR text`);
+    
+    // Look for material headings and dimensions
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      console.log(`Processing line: "${line}"`);
+      
+      // Check if this is a material heading
+      let isMaterialHeading = false;
+      for (const heading of materialHeadings) {
+        if (line.toLowerCase().includes(heading.key.toLowerCase())) {
+          // This looks like a material heading
+          if (!line.match(/\d+\s*[xX×*]\s*\d+/)) { // No dimensions in this line
+            currentMaterial = heading.value;
+            if (!materials.includes(currentMaterial)) {
+              materials.push(currentMaterial);
+              console.log(`Found material heading: ${currentMaterial}`);
+            }
+            isMaterialHeading = true;
+            break;
+          }
+        }
+      }
+      
+      if (isMaterialHeading) continue;
+      
+      // Try to extract dimensions
+      const dimensionMatch = line.match(/(\d+)\s*[xX×*]\s*(\d+)/);
+      if (dimensionMatch) {
+        const width = parseInt(dimensionMatch[1]);
+        const length = parseInt(dimensionMatch[2]);
+        
+        // Extract quantity if present
+        let quantity = 1;
+        const quantityMatch = line.match(/[=\-]\s*(\d+)/) || line.match(/\(\s*(\d+)\s*\)/) || line.match(/\d+\s*[xX×*]\s*\d+\s+(\d+)\b/);
+        if (quantityMatch) {
+          quantity = parseInt(quantityMatch[1]);
+        }
+        
+        dimensions.push({
+          id: `dim-${Date.now()}-${dimensions.length}`,
+          width,
+          length,
+          quantity,
+          material: currentMaterial,
+          description: line // Store the original line for reference
+        });
+        
+        console.log(`Added dimension: ${width}x${length}, qty=${quantity}, material=${currentMaterial}`);
+      }
+    }
+    
+    // Make sure we have at least one material
+    if (materials.length === 0) {
+      materials.push(DEFAULT_MATERIAL_CATEGORIES[0]);
+    }
+    
+    return { dimensions, materials };
+  };
+  
+  // Function to extract quantity from description field
+  const extractQuantityFromDescription = (description: string | undefined): number | null => {
+    if (!description) return null;
+    
+    // Array of regex patterns to extract quantity from description
+    const patterns = [
+      // Format: "2000x 460=2" or "918x460=4" (with equals sign)
+      /\s*[xX×*]\s*\d+\s*=\s*(\d+)/,
+      
+      // Format: "360x140-8" (with dash)
+      /\s*[xX×*]\s*\d+\s*-\s*(\d+)/,
+      
+      // Format: at the end of string after dimensions
+      /\s*[xX×*]\s*\d+\s+(\d+)$/,
+      
+      // Format: parentheses (3)
+      /\(\s*(\d+)\s*\)/,
+      
+      // Last resort: any number at the end
+      /\s(\d+)$/
+    ];
+    
+    // Try each pattern
+    for (const pattern of patterns) {
+      const match = description.match(pattern);
+      if (match && match[1]) {
+        const qty = parseInt(match[1], 10);
+        if (!isNaN(qty) && qty > 0) {
+          console.log(`Extracted quantity ${qty} from description: ${description}`);
+          return qty;
+        }
+      }
+    }
+    
+    return null;
+  };
+  
+  // ------------------------------------------------------------------
+  const materialHeadings = [
+    { key: "white melamine", value: "White Melamine" },
+    { key: "white melamme", value: "White Melamine" }, // Common spelling variation
+    { key: "doors", value: "Doors" },
+    { key: "door", value: "Doors" }, // Singular form
+    { key: "color", value: "Color" },
+    { key: "colour", value: "Color" }, // UK spelling
+    { key: "white messonite", value: "White Messonite" },
+    { key: "messonite", value: "White Messonite" }, // Just messonite
+  ];
+  const separatorWords = materialHeadings.map(m => m.key);
+  // ------------------------------------------------------------------
+
   // State for the component
-  const [cutPieces, setCutPieces] = useState<CutPiece[]>(normalizeCutPieces(initialData?.cutPieces || []));
+  const [hasDirectlyParsed, setHasDirectlyParsed] = useState<boolean>(false);
+  
+  // State to track materials detected from OCR text
+  const [detectedMaterials, setDetectedMaterials] = useState<string[]>([]);
+  
+  const [cutPieces, setCutPieces] = useState<CutPiece[]>(() => {
+    // Check if we have raw OCR text to parse directly
+    if (initialData.rawText && !hasDirectlyParsed) {
+      console.log('Direct OCR parsing activated');
+      const { dimensions, materials } = parseOcrText(initialData.rawText);
+      
+      // Save detected materials for later use
+      if (materials.length > 0) {
+        console.log(`Detected ${materials.length} materials from OCR text:`, materials);
+        setDetectedMaterials(materials);
+      }
+      
+      // If we got meaningful results from direct parsing, use those
+      if (dimensions.length > 0) {
+        console.log(`Directly parsed ${dimensions.length} dimensions from OCR text`);
+        setHasDirectlyParsed(true);
+        return normalizeCutPieces(dimensions);
+      }
+    }
+    
+    // Fallback to normal normalization
+    return normalizeCutPieces(initialData.cutPieces || []);
+  });
   const [stockPieces, setStockPieces] = useState<StockPiece[]>(initialData?.stockPieces || []);
   const [materials, setMaterials] = useState<Material[]>(initialData?.materials || []);
   const [unit, setUnit] = useState<string>(initialData?.unit || 'mm');
   const [customerName, setCustomerName] = useState<string>(initialData?.customerName || '');
   const [projectName, setProjectName] = useState<string>(initialData?.projectName || '');
   const [phoneNumber, setPhoneNumber] = useState<string>('');
-  const [whatsappDialogOpen, setWhatsappDialogOpen] = useState<boolean>(false);
+  const [whatsappDialogOpen, setWhatsappDialogOpen] = useState(false);
+  const [quoteSuccessDialogOpen, setQuoteSuccessDialogOpen] = useState(false);
+  const [confirmationDialogOpen, setConfirmationDialogOpen] = useState(false);
+  const [successQuoteData, setSuccessQuoteData] = useState<{ quoteId: string; pdfUrl: string; phoneNumber?: string } | null>(null);
   const [message, setMessage] = useState<string>('');
-  const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
-  const [snackbarMessage, setSnackbarMessage] = useState<string>('');
-  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info' | 'warning'>('success');
+  const [isLoading, setIsLoading] = useState(false);
   
   // Material options from API
   const [materialData, setMaterialData] = useState<any>(DEFAULT_MATERIAL_DATA);
@@ -143,20 +308,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   }
 
   const [sectionMaterials, setSectionMaterials] = useState<Record<number, SectionMaterial>>({});
-  // Section headings for material assignment
-  // Material headings with improved key detection
-  const materialHeadings = [
-    { key: "white melamine", value: "White Melamine" },
-    { key: "white melamme", value: "White Melamine" }, // Common spelling variation
-    { key: "doors", value: "Doors" },
-    { key: "door", value: "Doors" }, // Singular form
-    { key: "color", value: "Color" },
-    { key: "colour", value: "Color" }, // UK spelling
-    { key: "white messonite", value: "White Messonite" },
-    { key: "messonite", value: "White Messonite" }, // Just messonite
-  ];
-  const separatorWords = materialHeadings.map(m => m.key);
-
+  
   // Debug function to examine raw and normalized data
   function logRawPiecesForDebug(rawPieces: any[]) {
     console.log('====== DEBUG: RAW CUTLIST DATA ======');
@@ -170,15 +322,21 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   function normalizeCutPieces(rawPieces: any[]): CutPiece[] {
     // Debug the raw input
     logRawPiecesForDebug(rawPieces);
+    
+    // Add detailed logging for quantities
+    console.log('===== QUANTITY DEBUGGING =====');
+    rawPieces.forEach((piece, index) => {
+      console.log(`Raw Piece ${index}: name=${piece.name || piece.description || 'unnamed'}, width=${piece.width}, length=${piece.length}, quantity=${piece.quantity}, type=${typeof piece.quantity}`);
+    });
 
     const normalized: CutPiece[] = [];
     let currentMaterial = DEFAULT_MATERIAL_CATEGORIES[0];
     let materialSeen = new Set<string>();
     materialSeen.add(currentMaterial); // Always add the default material
-
-    // First check if any material names are direct matches in the input
-    // This handles cases where material names are their own rows with no measurements
-    const materialRows = new Set<number>();
+    
+    // We will skip rows that are detected as pure material headings so they are not
+  // added twice (once as a separator and once as a normal cut-piece row)
+  const headingRowIndexes = new Set<number>();
     
     for (let i = 0; i < rawPieces.length; i++) {
       const piece = rawPieces[i];
@@ -190,8 +348,9 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         const cleanHeading = heading.key.replace(/[^a-z0-9]/g, '');
         
         // If name contains the heading and has no measurements, it's likely a heading row
+        // If the row looks like a pure material heading (no measurements)
         if (cleanName.includes(cleanHeading) && (!piece.width && !piece.length)) {
-          materialRows.add(i);
+          headingRowIndexes.add(i);
           console.log(`Found material heading at row ${i}: ${piece.name} -> ${heading.value}`);
           break;
         }
@@ -211,7 +370,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
 
     // Add first material heading if not already the first item
     let currentIndex = 0;
-    if (!materialRows.has(0)) {
+    if (!headingRowIndexes.has(0)) {
       normalized.push({
         id: `sep-0-${Date.now()}`,
         name: DEFAULT_MATERIAL_CATEGORIES[0],
@@ -221,11 +380,22 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     }
 
     // Process each piece
-    for (let i = 0; i < rawPieces.length; i++) {
+    for (let i = 0; i <rawPieces.length; i++) {
       const piece = rawPieces[i];
-      
+
+      // NEW: Inject separator based on explicit material field
+      if (piece.material && !materialSeen.has(piece.material)) {
+        normalized.push({
+          id: `separator-${Date.now()}-${i}`,
+          separator: true,
+          name: piece.material,
+        });
+        materialSeen.add(piece.material);
+        currentMaterial = piece.material;
+      }
+
       // If this is a material heading row, insert a separator
-      if (materialRows.has(i)) {
+      if (headingRowIndexes.has(i)) {
         // Find the matching material
         const cleanName = (piece.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         const matchedHeading = materialHeadings.find(heading => {
@@ -248,17 +418,43 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       }
       
       // Normal cut piece - add with current material
-      if (piece.name && (piece.width || piece.length || piece.quantity)) {
-        normalized.push({
-          ...piece,
-          edging: piece.edging ?? 1,
-          separator: false,
-          lengthTick1: piece.lengthTick1 ?? false,
-          lengthTick2: piece.lengthTick2 ?? false,
-          widthTick1: piece.widthTick1 ?? false,
-          widthTick2: piece.widthTick2 ?? false,
-          material: currentMaterial,
-        });
+    // Use piece.name or piece.description to accommodate API response format
+    if ((piece.name || piece.description) && (piece.width || piece.length || piece.quantity)) {
+      // Debug quantity before normalization
+      console.log(`Before normalization - Piece ${i}: quantity=${piece.quantity}, type=${typeof piece.quantity}`);
+      
+      // Force quantity to be a number type, but preserve the original value if it exists
+  // Only default to 1 if quantity is undefined or null
+  let quantityValue = piece.quantity !== undefined && piece.quantity !== null ? Number(piece.quantity) : 1;
+  
+  // If quantity is 1, try to extract a better quantity from the description
+  if (quantityValue === 1 && (piece.description || piece.name)) {
+    const extractedQty = extractQuantityFromDescription(piece.description || piece.name);
+    if (extractedQty !== null) {
+      console.log(`Overriding quantity from 1 to ${extractedQty} based on description`);
+      quantityValue = extractedQty;
+    }
+  }
+  
+  console.log(`Final quantity for piece ${i}: ${quantityValue}`);
+    
+    // Ensure we preserve the original quantity explicitly
+      const normalizedPiece = {
+        ...piece,
+        quantity: quantityValue, // Force as number and ensure it's preserved
+        edging: piece.edging ?? 1,
+        separator: false,
+        lengthTick1: piece.lengthTick1 ?? false,
+        lengthTick2: piece.lengthTick2 ?? false,
+        widthTick1: piece.widthTick1 ?? false,
+        widthTick2: piece.widthTick2 ?? false,
+        material: currentMaterial,
+      };
+      
+      // Debug the normalized piece
+      console.log(`After normalization - Piece ${i}: quantity=${normalizedPiece.quantity}, type=${typeof normalizedPiece.quantity}`);
+      
+      normalized.push(normalizedPiece);
       }
     }
 
@@ -267,8 +463,16 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       if (p.separator) {
         return `[${i}] SEPARATOR: ${p.name}`;
       }
-      return `[${i}] ${p.name} (${p.material}) - ${p.length}x${p.width}`;
+      return `[${i}] ${p.name} (${p.material}) - ${p.length}x${p.width} quantity=${p.quantity}`;
     }));
+    
+    // Final quantity check
+    console.log('===== FINAL QUANTITY CHECK =====');
+    normalized.forEach((piece, index) => {
+      if (!piece.separator) {
+        console.log(`Final Piece ${index}: name=${piece.name || 'unnamed'}, quantity=${piece.quantity}, type=${typeof piece.quantity}`);
+      }
+    });
     
     return normalized;
   }
@@ -287,25 +491,20 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     async function fetchOptions() {
       setLoadingMaterials(true);
       try {
-        const [optionsResult, descriptions] = await Promise.all([
-          getMaterialOptions(),
-          getAllProductDescriptions(),
-        ]);
-
-        if (optionsResult.success && optionsResult.options) {
-          setMaterialData(optionsResult.options);
-          setMaterialCategories(Object.keys(optionsResult.options));
-        } else {
-          console.error('Failed to get material options:', optionsResult.error);
-          setMaterialData(DEFAULT_MATERIAL_DATA); // fallback
-          setMaterialCategories(DEFAULT_MATERIAL_CATEGORIES);
-        }
-
-        setProductDescriptions(descriptions);
-
+        // Only use the static PRODUCT_DESCRIPTIONS instead of API call
+        console.log('Using static product descriptions from file');
+        
+        // Use the real product descriptions imported from file
+        setProductDescriptions(PRODUCT_DESCRIPTIONS);
+        
+        // Set default material structure for other dropdowns
+        setMaterialData(DEFAULT_MATERIAL_DATA);
+        setMaterialCategories(DEFAULT_MATERIAL_CATEGORIES);
+        
       } catch (error) {
-        console.error('Error fetching material data:', error);
-        setMaterialData(DEFAULT_MATERIAL_DATA); // fallback
+        console.error('Error setting up material data:', error);
+        // Use fallbacks
+        setMaterialData(DEFAULT_MATERIAL_DATA);
         setMaterialCategories(DEFAULT_MATERIAL_CATEGORIES);
       } finally {
         setLoadingMaterials(false);
@@ -326,6 +525,41 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     }
   }, [initialData]);
 
+  useEffect(() => {
+    // If we have detected materials from OCR text, use those instead of default
+    if (detectedMaterials.length > 0) {
+      // Clear existing cut pieces that are separators
+      setCutPieces(prevPieces => {
+        const nonSeparators = prevPieces.filter(p => !p.separator);
+        let result: CutPiece[] = [];
+        
+        // Add a separator for each detected material
+        detectedMaterials.forEach((material, index) => {
+          // Add separator
+          result.push({
+            id: `ocr-sep-${index}-${Date.now()}`,
+            name: material,
+            separator: true,
+          });
+          
+          // Add cut pieces that match this material
+          const materialPieces = nonSeparators.filter(p => p.material === material);
+          result = [...result, ...materialPieces];
+        });
+        
+        // Add any remaining pieces that don't have a material match
+        const remainingPieces = nonSeparators.filter(p => !detectedMaterials.includes(p.material || ''));
+        result = [...result, ...remainingPieces];
+        
+        return result;
+      });
+    }
+    // Otherwise, make sure at least one material section exists
+    else if (cutPieces.length === 0 || !cutPieces.some(p => p.separator)) {
+      handleAddMaterialSection();
+    }
+  }, [detectedMaterials.length]);
+
   const handleCutPieceChange = (id: string, field: keyof CutPiece, value: any) => {
     setCutPieces(prevCutPieces =>
       prevCutPieces.map(piece =>
@@ -335,15 +569,55 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   };
 
   const handleAddMaterialSection = () => {
-    const newId = `separator-${Date.now()}`;
+    // Generate unique IDs for both the separator and the new piece
+    const separatorId = `separator-${Date.now()}`;
+    const newPieceId = `piece-${Date.now()}`;
+    
+    // Default material to use
+    const defaultMaterial = materialCategories.length > 0 ? materialCategories[0] : 'New Material';
+    
+    // Add both the separator and a blank piece at once
     setCutPieces(prevCutPieces => [
       ...prevCutPieces,
+      // Add the material section separator
       {
-        id: newId,
+        id: separatorId,
         separator: true,
-        name: materialCategories[0] || 'New Material',
+        name: defaultMaterial,
+        material: defaultMaterial,
       },
+      // Add an empty piece with the same material
+      {
+        id: newPieceId,
+        name: '',
+        width: undefined,
+        length: undefined,
+        quantity: 1,
+        material: defaultMaterial,
+        edging: 0,
+        lengthTick1: false,
+        lengthTick2: false,
+        widthTick1: false,
+        widthTick2: false,
+      }
     ]);
+    
+    // Set a material section for the newly added material if we have material categories
+    if (materialCategories.length > 0) {
+      // Create a default section material structure for the dropdown
+      setSectionMaterials(prev => {
+        const newMaterialSection = {
+          material: defaultMaterial,
+          category: materialCategories[0] || '',
+        };
+        return {...prev, [cutPieces.length]: newMaterialSection};
+      });
+    }
+    
+    // Show confirmation message
+    setSnackbarMessage('New material section added');
+    setSnackbarSeverity('success');
+    setSnackbarOpen(true);
   };
 
   const handleAddCutPiece = (materialName?: string) => {
@@ -396,12 +670,62 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     setCutPieces(prevCutPieces => prevCutPieces.filter(piece => piece.id !== id));
   };
 
+  // Function to delete a material section and all its pieces
+  const handleDeleteMaterialSection = (headingIdx: number) => {
+    setCutPieces(prevCutPieces => {
+      // Create a copy of current pieces
+      const updatedPieces = [...prevCutPieces];
+      
+      // Find the separator piece at the given index
+      if (!updatedPieces[headingIdx] || !updatedPieces[headingIdx].separator) {
+        console.error('Cannot delete: invalid material section index or not a separator');
+        return prevCutPieces;
+      }
+      
+      // Find the next separator piece (or end of array)
+      let nextSeparatorIdx = updatedPieces.findIndex((piece, idx) => 
+        idx > headingIdx && piece.separator
+      );
+      
+      if (nextSeparatorIdx === -1) {
+        nextSeparatorIdx = updatedPieces.length;
+      }
+      
+      // Remove the separator and all pieces until the next separator
+      updatedPieces.splice(headingIdx, nextSeparatorIdx - headingIdx);
+      
+      // Ensure there's at least one material section left
+      if (!updatedPieces.some(piece => piece.separator)) {
+        // Add default material section if all were deleted
+        updatedPieces.unshift({
+          id: `sep-default-${Date.now()}`,
+          name: DEFAULT_MATERIAL_CATEGORIES[0],
+          separator: true,
+        });
+      }
+      
+      return updatedPieces;
+    });
+  };
+
   const handleSave = () => {
+    // Validate all piece fields
     if (cutPieces.some(p => !p.separator && (!p.length || !p.width || !p.quantity))) {
       setSnackbarMessage('Please fill in all dimensions and quantity for each piece.');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
       return;
+    }
+    // Material required validation
+    if (requireMaterialValidation) {
+      const sections = getSections();
+      const missingMaterial = sections.some(section => !section.material || section.material.trim() === '');
+      if (missingMaterial) {
+        setSnackbarMessage('Please select a material for every section.');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        return;
+      }
     }
     onSave({
       stockPieces,
@@ -415,6 +739,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     setSnackbarSeverity('success');
     setSnackbarOpen(true);
   };
+
 
   const handleOpenWhatsAppDialog = () => setWhatsappDialogOpen(true);
   const handleCloseWhatsAppDialog = () => setWhatsappDialogOpen(false);
@@ -443,6 +768,40 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         setSnackbarSeverity('error');
         setSnackbarOpen(true);
     }
+  };
+
+  // Function to calculate edging based on checkbox selections
+  const calculateEdging = (piece: CutPiece): number => {
+    const edgesToCount = [
+      piece.lengthTick1,
+      piece.lengthTick2,
+      piece.widthTick1,
+      piece.widthTick2
+    ].filter(Boolean).length;
+    
+    return edgesToCount > 0 ? 1 : 0; // Return 1 if any edge is selected, 0 otherwise
+  };
+
+  // Utility function to download a PDF from a URL
+  const downloadPdf = (url: string, filename: string) => {
+    // Check if it's a data URL or regular URL
+    let downloadUrl = url;
+    
+    // If it's a regular URL (not a data URL), make sure it's absolute
+    if (!url.startsWith('data:')) {
+      downloadUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
+    }
+    
+    console.log(`Preparing PDF download with URL type: ${url.startsWith('data:') ? 'data URL' : 'regular URL'}`);
+    
+    // Create a link element and simulate a click to trigger download
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', filename);
+    link.setAttribute('target', '_blank');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Function to extract dimensions from product data
@@ -488,7 +847,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   };
 
   // Function to send cutlist data to the calculation tool
-  const handleCalculate = async () => {
+  const handleCalculate = () => {
     // Validate data
     if (cutPieces.length === 0) {
       setSnackbarMessage('Please add cut pieces first');
@@ -497,160 +856,154 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       return;
     }
 
-    const invalidPiece = cutPieces.find(p => !p.separator && (!p.lengthTick1 || !p.lengthTick2));
-    if (invalidPiece) {
-      setSnackbarMessage('Please select both Length tick boxes for each cut piece.');
+    // Group the cutlist pieces by material section
+    const sections = getSections();
+    console.log('Material sections:', sections);
+    
+    if (sections.length === 0) {
+      setSnackbarMessage('No valid material sections found. Please add at least one material section with cut pieces.');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
       return;
     }
+    
+    // Open the confirmation dialog
+    setConfirmationDialogOpen(true);
+  };
 
-    if (!phoneNumber) {
-      setSnackbarMessage('Please enter a phone number to receive the quotation');
-      setSnackbarSeverity('warning');
-      setSnackbarOpen(true);
-      setWhatsappDialogOpen(true);
-      return;
-    }
-
+  // Function to process the optimizer after user confirms measurements
+  const processOptimizer = async () => {
     try {
       setSnackbarMessage('Calculating optimal cutting plan and generating quotation...');
       setSnackbarSeverity('info');
       setSnackbarOpen(true);
       
-      // Get material names from the cutlist (from separators)
+      // Group the cutlist pieces by material section
       const sections = getSections();
-      const materialNames = sections.map(section => section.material);
       
-      // Get pricing information for each material
-      const pricingPromises = materialNames.map(materialName => 
-        getProductPricing(materialName || 'White Melamine')
-      );
+      // Prepare data for the backend
+      const sectionData = sections.map(section => ({
+        material: section.material,
+        cutPieces: section.pieces.map(piece => ({
+          id: piece.id,
+          width: piece.width || 0,
+          length: piece.length || 0,
+          amount: piece.quantity || 1,
+          edging: calculateEdging(piece),
+          name: piece.name
+        }))
+      }));
       
-      const pricingResults = await Promise.all(pricingPromises);
+      // Prepare the request payload
+      const quotePayload = {
+        sections: sectionData,
+        customerName: customerName || 'Customer',
+        projectName: projectName || 'Custom Cutlist',
+        phoneNumber: phoneNumber || '',
+        branchData: branchData || null
+      };
       
-      // Create stock pieces based on material dimensions from description
-      const newStockPieces: StockPiece[] = [];
-      const materialPrices: Record<string, number> = {};
+      console.log('Sending quote request to backend:', quotePayload);
       
-      pricingResults.forEach((result, index) => {
-        if (result.success && result.data) {
-          const materialName = materialNames[index] || 'White Melamine';
-          const dimensions = extractDimensions(result.data);
-          
-          // Add stock piece with the dimensions
-          newStockPieces.push({
-            id: `stock-${Date.now()}-${index}`,
-            length: dimensions.length,
-            width: dimensions.width,
-            quantity: 100, // Large quantity so optimizer can use as many as needed
-            material: materialName
+      // Use the new backend endpoint for generating quotes
+      const quoteResult = await generateQuote(quotePayload);
+      
+      console.log('Quote result from backend:', quoteResult);
+      
+      if (!quoteResult.success) {
+        console.error('Quote generation failed:', quoteResult);
+        // Use the detailed error message if available, otherwise use the general message or a fallback
+        const errorMessage = quoteResult.error || quoteResult.message || 'Unknown error';
+        setSnackbarMessage(`Failed to generate quote: ${errorMessage}`);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        return;
+      }
+      
+      // Extract data from the response
+      const { quoteId, sections: processedSections, grandTotal, pdfUrl } = quoteResult.data;
+      
+      // Trigger PDF download
+      if (pdfUrl) {
+        console.log('Downloading PDF from URL:', pdfUrl ? pdfUrl.substring(0, 100) + '...' : 'undefined');
+        
+        // Handle both Supabase public URLs and base64 data URLs
+        if (pdfUrl.startsWith('data:application/pdf;base64,') || pdfUrl.startsWith('http')) {
+          console.log('Valid PDF URL detected:', pdfUrl.startsWith('data:') ? 'base64 format' : 'Supabase public URL');
+          // Store data and open success modal
+          setSuccessQuoteData({
+            quoteId,
+            pdfUrl,
+            phoneNumber: phoneNumber || undefined
           });
-          
-          // Store price for later use
-          materialPrices[materialName] = result.data.price || 0;
-        }
-      });
-      
-      // Organize cut pieces by material
-      let quotationText = '';
-      let totalPrice = 0;
-      
-      // Process each material section
-      for (const section of sections) {
-        const materialName = section.material || 'White Melamine';
-        const materialCutPieces = cutPieces.filter(p => 
-          !p.separator && p.material === materialName
-        );
-        
-        // Skip if no cut pieces for this material
-        if (materialCutPieces.length === 0) continue;
-        
-        // Find the stock piece for this material
-        const stockPiece = newStockPieces.find(sp => sp.material === materialName);
-        if (!stockPiece) continue;
-        
-        // Prepare data for optimizer
-        const optimizerData = {
-          cutPieces: materialCutPieces.map(p => ({
-            id: p.id,
-            width: p.width || 0,
-            length: p.length || 0,
-            quantity: p.quantity || 1,
-            edging: p.edging || 0
-          })),
-          stockPieces: [stockPiece]
-        };
-        
-        // Call optimizer
-        const optimizerResult = await optimizeCutting(optimizerData);
-        
-        if (optimizerResult.success) {
-          // Calculate price for this material
-          const boardsNeeded = optimizerResult.data.boardsNeeded || 0;
-          const materialPrice = materialPrices[materialName] || 0;
-          const sectionPrice = boardsNeeded * materialPrice;
-          totalPrice += sectionPrice;
-          
-          // Build quotation text
-          quotationText += `\n*${materialName}*\n`;
-          quotationText += `- Boards needed: ${boardsNeeded}\n`;
-          quotationText += `- Price per board: R ${materialPrice.toFixed(2)}\n`;
-          quotationText += `- Section total: R ${sectionPrice.toFixed(2)}\n`;
-        }
-      }
-      
-      // Add grand total to quotation
-      quotationText = `*Quotation Summary*\n${quotationText}\n*Total Price: R ${totalPrice.toFixed(2)}*`;
-      
-      // Add customer and project info if available
-      if (customerName) {
-        quotationText = `Customer: ${customerName}\n${quotationText}`;
-      }
-      
-      if (projectName) {
-        quotationText = `Project: ${projectName}\n${quotationText}`;
-      }
-      
-      // Generate PDF
-      const pdfResult = await getPdfUrl({ content: quotationText, title: `Cutlist Quotation ${projectName || ''}` });
-      let pdfUrl = '';
-      
-      if (pdfResult.success && pdfResult.data && pdfResult.data.url) {
-        pdfUrl = pdfResult.data.url;
-      }
-      
-      // Set message with quotation text
-      setMessage(quotationText);
-      
-      // If WhatsApp integration is enabled and we have a phone number
-      if (onSendWhatsApp && phoneNumber) {
-        try {
-          // Send the WhatsApp message with the PDF
-          await botsailorService.sendWhatsAppMessage({
-            to: phoneNumber,
-            message: quotationText,
-            pdfUrl: pdfUrl
-          });
-          
-          setSnackbarMessage('Quotation sent successfully to WhatsApp');
-          setSnackbarSeverity('success');
-          setSnackbarOpen(true);
-        } catch (whatsappError) {
-          console.error('WhatsApp sending error:', whatsappError);
-          setSnackbarMessage('Failed to send WhatsApp message');
+          setQuoteSuccessDialogOpen(true);
+        } else {
+          console.error('Invalid PDF URL format');
+          setSnackbarMessage('PDF generation failed: invalid URL format');
           setSnackbarSeverity('error');
           setSnackbarOpen(true);
         }
+      } else {
+        console.error('No PDF URL received from server');
+        setSnackbarMessage('PDF generation failed: no URL received');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
       }
+      
+      // Generate quotation text for WhatsApp
+      const now = new Date();
+      const quoteDate = now.toLocaleDateString();
+      
+      // Helper to format numbers safely without throwing
+      const safeFixed = (val: number | undefined | null, digits = 2): string =>
+        typeof val === 'number' && isFinite(val) ? val.toFixed(digits) : '-';
+      
+      const quotationText = `
+HDS GROUP QUOTATION
+
+Quote: ${quoteId}
+Date: ${quoteDate}
+Customer: ${customerName || 'Customer'}
+Project: ${projectName || 'Custom Cutlist'}
+
+${'='.repeat(50)}
+
+${processedSections.map(section => 
+`MATERIAL: ${section.material}
+Board Size: ${section.boardSize}
+Quantity: ${section.boardsNeeded}
+Price per Board: R ${safeFixed(section.pricePerBoard)}
+Section Total: R ${safeFixed(section.sectionTotal)}
+`
+).join('\n')}
+${'='.repeat(50)}
+
+GRAND TOTAL: R ${safeFixed(grandTotal)}
+
+Thank you for your business!
+`;
+      
+      // Set a success message
+      setSnackbarMessage(`Quotation generated successfully. Total: R ${safeFixed(grandTotal)}`);
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      
+      // WhatsApp message will be sent from the success modal when user clicks the button
+      
     } catch (error) {
-      console.error('Error during calculation:', error);
-      setSnackbarMessage('Failed to calculate cutting plan. Please try again.');
+      console.error('Calculation error:', error);
+      setSnackbarMessage('Failed to calculate boards and price.');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
     }
   };
 
+  // Handle closing the quote success dialog
+  const handleCloseQuoteSuccessDialog = () => {
+    setQuoteSuccessDialogOpen(false);
+  };
+  
+  // Handle closing the snackbar
   const handleCloseSnackbar = (event?: React.SyntheticEvent | Event, reason?: string) => {
     if (reason === 'clickaway') {
       return;
@@ -658,19 +1011,144 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     setSnackbarOpen(false);
   };
 
+  const handleCloseConfirmationDialog = () => {
+    setConfirmationDialogOpen(false);
+  };
+
+  const handleConfirmMeasurements = async () => {
+    setConfirmationDialogOpen(false);
+    await processOptimizer();
+  };
+
+  const navigate = useNavigate();
+  // Handle creating a new quote from the success modal
+  const handleNewQuote = () => {
+    navigate('/cutlist-edit/new');
+  };
+
+  // Handle PDF download from the success modal
+  const handleDownloadQuotePdf = () => {
+    if (successQuoteData?.pdfUrl) {
+      downloadPdf(successQuoteData.pdfUrl, `Quote-${successQuoteData.quoteId}.pdf`);
+    }
+  };
+  
+  // Handle sharing to WhatsApp from the success modal
+  const handleShareToWhatsApp = async () => {
+    if (!successQuoteData?.quoteId || !successQuoteData?.pdfUrl) {
+      setSnackbarMessage('Missing quote data for WhatsApp sharing');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    
+    try {
+      // Set loading state
+      setIsLoading(true);
+      
+      // Extract PDF data URL and convert to proper URL if needed
+      let pdfUrl = successQuoteData.pdfUrl;
+      let finalPdfUrl = pdfUrl;
+      
+      // If this is a data URL, we need to upload it to the server to get a shareable link
+      const isPdfDataUrl = pdfUrl.startsWith('data:application/pdf');
+      
+      if (isPdfDataUrl) {
+        // Show loading message
+        setSnackbarMessage('Preparing PDF for sharing...');
+        setSnackbarSeverity('info');
+        setSnackbarOpen(true);
+        
+        try {
+          // Upload PDF data URL to get a shareable link
+          const response = await fetch('/api/quotes/upload-pdf', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              quoteId: successQuoteData.quoteId,
+              pdfDataUrl: pdfUrl
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error('Failed to upload PDF');
+          }
+          
+          const result = await response.json();
+          finalPdfUrl = result.pdfUrl; // Use the URL returned by the server
+          
+        } catch (uploadError) {
+          console.error('PDF upload error:', uploadError);
+          // If upload fails, we'll use a fallback message
+          setSnackbarMessage('Failed to prepare PDF for sharing, using fallback method');
+          setSnackbarSeverity('warning');
+          setSnackbarOpen(true);
+        }
+      }
+      
+      // Create a thank you message from HDS stating that the quotation is ready
+      let thankYouMessage = `Thank you for choosing HDS Group! Your quotation (ID: ${successQuoteData.quoteId}) is now ready.`;
+      
+      // Always include the PDF link - either the uploaded URL or the original URL
+      thankYouMessage += ` You can view and download your quotation at: ${finalPdfUrl}\n\nWe appreciate your business and look forward to working with you.`;
+      
+      // Encode the message for the WhatsApp URL
+      const encodedMessage = encodeURIComponent(thankYouMessage);
+      
+      // Create the WhatsApp URL with the encoded message
+      const whatsappUrl = `whatsapp://send?text=${encodedMessage}`;
+      
+      // Clear loading state
+      setIsLoading(false);
+      
+      // Open the URL in a new window/tab
+      window.open(whatsappUrl, '_blank');
+      
+      setSnackbarMessage('WhatsApp sharing initiated with PDF download link');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      handleCloseQuoteSuccessDialog();
+    } catch (error) {
+      console.error('WhatsApp sharing error:', error);
+      setSnackbarMessage('Failed to initiate WhatsApp sharing');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      setIsLoading(false);
+    }
+  };
+
   // This function finds all sections based on separator pieces
   const getSections = () => {
     const sections: { material: string, pieces: CutPiece[], headingIdx: number }[] = [];
-    if (!cutPieces) return sections;
+    if (!cutPieces) {
+      console.log('EditableCutlistTable: No cut pieces available');
+      return sections;
+    }
+    
+    console.log('EditableCutlistTable: Processing', cutPieces.length, 'cut pieces for sections');
+    console.log('EditableCutlistTable: Separator pieces:', cutPieces.filter(p => p.separator).map(p => p.name || 'Unnamed'));
 
     let currentPieces: CutPiece[] = [];
     let currentMaterial: string | undefined;
     let currentHeadingIdx: number = -1;
 
     cutPieces.forEach((piece, idx) => {
+      // Debug the current piece
+      console.log(`EditableCutlistTable: Processing piece ${idx}:`, { 
+        id: piece.id, 
+        name: piece.name, 
+        separator: piece.separator,
+        material: piece.material,
+        dimensions: `${piece.length}x${piece.width}`
+      });
+      
       if (piece.separator) {
+        console.log(`EditableCutlistTable: Found separator at index ${idx} for material: ${piece.name}`);
         if (currentMaterial !== undefined && currentHeadingIdx !== -1) {
           sections.push({ material: currentMaterial, pieces: currentPieces, headingIdx: currentHeadingIdx });
+          console.log(`EditableCutlistTable: Created section for ${currentMaterial} with ${currentPieces.length} pieces`);
         }
         currentMaterial = piece.name || 'Unknown Material';
         currentHeadingIdx = idx;
@@ -682,7 +1160,12 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
 
     if (currentMaterial !== undefined && currentHeadingIdx !== -1) {
       sections.push({ material: currentMaterial, pieces: currentPieces, headingIdx: currentHeadingIdx });
+      console.log(`EditableCutlistTable: Created final section for ${currentMaterial} with ${currentPieces.length} pieces`);
     }
+    
+    console.log('EditableCutlistTable: Created', sections.length, 'material sections');
+    console.log('EditableCutlistTable: Section materials:', sections.map(s => s.material));
+    
     return sections;
   };
 
@@ -693,9 +1176,26 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       {isMobile ? (
         // Mobile Card View
         <Box sx={{ p: 2 }}>
+          {/* Mobile view heading with add material section button */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">Cutlist</Typography>
+            <Button 
+              variant="contained" 
+              color="secondary"
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={handleAddMaterialSection}
+              disabled={isConfirmed}
+              sx={{ fontWeight: 'bold' }}
+            >
+              Add Material
+            </Button>
+          </Box>
+          
           {sections.map((section, sectionIdx) => (
             <Box key={`section-mobile-${sectionIdx}`} sx={{ mb: 3 }}>
-                <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <FormControl fullWidth size="small" required={requireMaterialValidation} error={requireMaterialValidation && (!section.material || section.material.trim() === '')}>
                     <InputLabel>Material</InputLabel>
                     <Select
                         value={section.material}
@@ -703,6 +1203,11 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                             const newMaterial = e.target.value;
                             const updatedPieces = [...cutPieces];
                             updatedPieces[section.headingIdx].name = newMaterial;
+                            // Update material for all pieces in this section
+                            for (let i = section.headingIdx + 1; i < updatedPieces.length; i++) {
+                                if (updatedPieces[i].separator) break;
+                                updatedPieces[i].material = newMaterial;
+                            }
                             setCutPieces(updatedPieces);
                         }}
                         disabled={isConfirmed || loadingMaterials}
@@ -711,14 +1216,31 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                             <MenuItem key={description} value={description}>{description}</MenuItem>
                         ))}
                     </Select>
-                </FormControl>
+                    {requireMaterialValidation && (!section.material || section.material.trim() === '') && (
+                      <Typography variant="caption" color="error">Material is required</Typography>
+                    )}
+                  </FormControl>
+                  <IconButton
+                    aria-label="Delete material section"
+                    onClick={() => {
+                      if (isConfirmed || loadingMaterials) return;
+                      // Delete the entire material section instead of just clearing the name
+                      handleDeleteMaterialSection(section.headingIdx);
+                    }}
+                    color="error"
+                    sx={{ ml: 1 }}
+                    disabled={isConfirmed || loadingMaterials || sections.length <= 1} // Prevent deleting the last section
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </Box>
 
               {section.pieces.map((piece, pieceIdx) => (
                 <Paper key={piece.id} elevation={2} sx={{ p: 2, mb: 2 }}>
                   <TextField fullWidth label="Name" value={piece.name || ''} onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)} variant="outlined" size="small" sx={{ mb: 1.5 }} disabled={isConfirmed} />
                   <Box sx={{ display: 'flex', gap: 2, mb: 1.5 }}>
-                    <TextField label={`Length (${unit})`} type="number" value={piece.length || ''} onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)} variant="outlined" size="small" disabled={isConfirmed} />
-                    <TextField label={`Width (${unit})`} type="number" value={piece.width || ''} onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)} variant="outlined" size="small" disabled={isConfirmed} />
+                    <TextField label={`Length (${unit})`} type="number" value={piece.length ?? ''} onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)} variant="outlined" size="small" disabled={isConfirmed} />
+                    <TextField label={`Width (${unit})`} type="number" value={piece.width ?? ''} onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)} variant="outlined" size="small" disabled={isConfirmed} />
                   </Box>
                   <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', mb: 1 }}>
                     <FormControlLabel control={<Checkbox checked={!!piece.lengthTick1} onChange={e => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)} disabled={isConfirmed} />} label="L1" />
@@ -727,7 +1249,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
                     <FormControlLabel control={<Checkbox checked={!!piece.widthTick2} onChange={e => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)} disabled={isConfirmed} />} label="W2" />
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2}}>
-                    <TextField label="Quantity" type="number" value={piece.quantity || 1} onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)} variant="outlined" size="small" inputProps={{ min: 1 }} disabled={isConfirmed} />
+                    <TextField label="Quantity" type="number" value={piece.quantity !== undefined && piece.quantity !== null ? piece.quantity : 1} onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)} variant="outlined" size="small" inputProps={{ min: 1 }} disabled={isConfirmed} />
                     <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" disabled={isConfirmed}><DeleteIcon /></IconButton>
                   </Box>
                 </Paper>
@@ -741,79 +1263,228 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         <Box sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6">Cutlist</Typography>
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleAddCutPiece()} disabled={isConfirmed}>Add Piece</Button>
-              <Button variant="outlined" onClick={handleAddMaterialSection} disabled={isConfirmed}>Add Material</Button>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button variant="outlined" startIcon={<AddIcon />} onClick={() => handleAddCutPiece()} disabled={isConfirmed}>Add Piece</Button>
+              <Button 
+                variant="contained" 
+                color="secondary" 
+                startIcon={<AddIcon />} 
+                onClick={handleAddMaterialSection} 
+                disabled={isConfirmed}
+                sx={{ fontWeight: 'bold' }}
+              >
+                Add New Material Section
+              </Button>
             </Box>
           </Box>
-          <TableContainer component={Paper} elevation={2}>
-            <Table stickyHeader size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Material</TableCell>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Length ({unit})</TableCell>
-                  <TableCell>Width ({unit})</TableCell>
-                  <TableCell align="center">L1</TableCell>
-                  <TableCell align="center">L2</TableCell>
-                  <TableCell align="center">W1</TableCell>
-                  <TableCell align="center">W2</TableCell>
-                  <TableCell>Quantity</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {cutPieces.map((piece, index) =>
-                  piece.separator ? (
-                    <TableRow key={piece.id}>
-                      <TableCell colSpan={10} sx={{ backgroundColor: '#f0f0f0' }}>
-                        <FormControl fullWidth size="small">
-                            <Select
-                                variant="standard"
-                                value={piece.name}
-                                onChange={(e) => {
-                                    const newMaterial = e.target.value;
-                                    const updatedPieces = [...cutPieces];
-                                    updatedPieces[index].name = newMaterial;
-                                    // also update material for all subsequent pieces until next separator
-                                    for (let i = index + 1; i < updatedPieces.length; i++) {
-                                        if (updatedPieces[i].separator) break;
-                                        updatedPieces[i].material = newMaterial;
-                                    }
-                                    setCutPieces(updatedPieces);
-                                }}
-                                disabled={isConfirmed || loadingMaterials}
-                            >
-                                {loadingMaterials ? <MenuItem disabled>Loading...</MenuItem> : materialCategories.map(cat => (
-                                    <MenuItem key={cat} value={cat}>{cat}</MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    <TableRow key={piece.id}>
-                      <TableCell>{piece.material}</TableCell>
-                      <TableCell><TextField size="small" variant="outlined" value={piece.name} onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)} disabled={isConfirmed} /></TableCell>
-                      <TableCell><TextField size="small" variant="outlined" type="number" value={piece.length} onChange={(e) => handleCutPieceChange(piece.id, 'length', e.target.value)} disabled={isConfirmed} /></TableCell>
-                      <TableCell><TextField size="small" variant="outlined" type="number" value={piece.width} onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)} disabled={isConfirmed} /></TableCell>
-                      <TableCell align="center"><Checkbox checked={!!piece.lengthTick1} onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)} disabled={isConfirmed} /></TableCell>
-                      <TableCell align="center"><Checkbox checked={!!piece.lengthTick2} onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)} disabled={isConfirmed} /></TableCell>
-                      <TableCell align="center"><Checkbox checked={!!piece.widthTick1} onChange={(e) => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)} disabled={isConfirmed} /></TableCell>
-                      <TableCell align="center"><Checkbox checked={!!piece.widthTick2} onChange={(e) => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)} disabled={isConfirmed} /></TableCell>
-                      <TableCell><TextField size="small" variant="outlined" type="number" value={piece.quantity} onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)} disabled={isConfirmed} /></TableCell>
-                      <TableCell><IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" disabled={isConfirmed}><DeleteIcon /></IconButton></TableCell>
-                    </TableRow>
-                  )
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          {(() => {
+            // Get all material sections
+            const sections = getSections();
+            
+            if (sections.length === 0 && cutPieces.length === 0) {
+              // No materials or pieces yet, show a welcome message
+              return (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography variant="h6" sx={{ mb: 2 }}>No materials added yet</Typography>
+                  <Button 
+                    variant="contained" 
+                    color="primary"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddMaterialSection}
+                  >
+                    Add Your First Material Section
+                  </Button>
+                </Box>
+              );
+            }
+            
+            // Return a separate table for each material section
+            return sections.map((section, sectionIndex) => (
+              <Box key={section.headingIdx} sx={{ mb: 4 }}>
+                <Paper elevation={2} sx={{ p: 0, borderRadius: '4px', overflow: 'hidden' }}>
+                  {/* Section header */}
+                  <Box 
+                    sx={{ 
+                      bgcolor: 'primary.main', 
+                      color: 'white', 
+                      px: 2, 
+                      py: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                        Material Section {sectionIndex + 1}: {section.material}
+                      </Typography>
+                      {!isConfirmed && sections.length > 1 && (
+                        <IconButton 
+                          size="small" 
+                          onClick={() => handleDeleteMaterialSection(section.headingIdx)}
+                          sx={{ ml: 1, color: 'white' }}
+                          disabled={isConfirmed}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Box>
+                    {!isConfirmed && (
+                      <Button 
+                        variant="contained" 
+                        color="secondary" 
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={() => handleAddCutPiece(section.material)}
+                      >
+                        Add Piece
+                      </Button>
+                    )}
+                  </Box>
+                  
+                  {/* Section table */}
+                  <TableContainer>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          {!isConfirmed && <TableCell width="5%"></TableCell>}
+                          <TableCell width="30%">Name</TableCell>
+                          <TableCell width="15%" align="right">Width (mm)</TableCell>
+                          <TableCell width="15%" align="right">Length (mm)</TableCell>
+                          <TableCell width="10%" align="right">Qty</TableCell>
+                          {!isConfirmed && (
+                            <>
+                              <TableCell width="5%" align="center">L1</TableCell>
+                              <TableCell width="5%" align="center">L2</TableCell>
+                              <TableCell width="5%" align="center">W1</TableCell>
+                              <TableCell width="5%" align="center">W2</TableCell>
+                            </>
+                          )}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {section.pieces.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={isConfirmed ? 5 : 9} align="center">
+                              <Typography sx={{ py: 2, color: 'text.secondary' }}>No pieces added to this material section</Typography>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          section.pieces.map((piece) => (
+                            <TableRow key={piece.id}>
+                              {!isConfirmed && (
+                                <TableCell>
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={() => handleDeleteCutPiece(piece.id)}
+                                    disabled={isConfirmed}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </TableCell>
+                              )}
+                              <TableCell>
+                                <TextField
+                                  variant="standard"
+                                  value={piece.name || ''}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
+                                  fullWidth
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  variant="standard"
+                                  value={piece.width || ''}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'width', Number(e.target.value))}
+                                  type="number"
+                                  InputProps={{ inputProps: { min: 0, step: 1 } }}
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  variant="standard"
+                                  value={piece.length || ''}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'length', Number(e.target.value))}
+                                  type="number"
+                                  InputProps={{ inputProps: { min: 0, step: 1 } }}
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  variant="standard"
+                                  value={piece.quantity !== undefined && piece.quantity !== null ? piece.quantity : 1}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'quantity', Number(e.target.value))}
+                                  type="number"
+                                  InputProps={{ inputProps: { min: 1, step: 1 } }}
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              {!isConfirmed && (
+                                <>
+                                  <TableCell align="center">
+                                    <Checkbox 
+                                      checked={!!piece.lengthTick1} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    <Checkbox 
+                                      checked={!!piece.lengthTick2} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    <Checkbox 
+                                      checked={!!piece.widthTick1} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    <Checkbox 
+                                      checked={!!piece.widthTick2} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
+                                  </TableCell>
+                                </>
+                              )}
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Paper>
+              </Box>
+            ));
+          })()}
+          {!isConfirmed && (
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2, mb: 2 }}>
+              <Box>
+              </Box>
+            </Box>
+          )}
         </Box>
       )}
 
       <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-        <Button variant="outlined" color="primary" onClick={handleSave} disabled={isConfirmed}>Save Cutlist</Button>
+        
+        {!isConfirmed && (
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={<AddIcon />}
+            onClick={handleAddMaterialSection}
+          >
+            Add New Material Section
+          </Button>
+        )}
         <Button 
           variant="contained" 
           color="primary" 
@@ -821,11 +1492,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         >
           Confirm Cutlist
         </Button>
-        {onSendWhatsApp && (
-          <Button variant="contained" color="success" startIcon={<WhatsAppIcon />} onClick={handleOpenWhatsAppDialog}>
-            Send to WhatsApp
-          </Button>
-        )}
+        
       </Box>
 
       <Dialog open={whatsappDialogOpen} onClose={handleCloseWhatsAppDialog}>
@@ -846,6 +1513,88 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
           {snackbarMessage}
         </Alert>
       </Snackbar>
+
+      {/* Confirmation Dialog */}
+      <Dialog
+        open={confirmationDialogOpen}
+        onClose={handleCloseConfirmationDialog}
+        aria-labelledby="confirmation-dialog-title"
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle id="confirmation-dialog-title" sx={{ bgcolor: 'primary.main', color: 'white' }}>
+          Please Confirm Your Measurements
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          <Typography variant="h6" gutterBottom>
+            Are you sure all measurements and material selections are correct?
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Once confirmed, we will generate your optimal cutting plan and prepare your quotation.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseConfirmationDialog}>Cancel</Button>
+          <Button onClick={handleConfirmMeasurements} variant="contained" color="primary">
+            Yes, Continue
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Quote Success Dialog */}
+      <Dialog
+        open={quoteSuccessDialogOpen}
+        onClose={handleCloseQuoteSuccessDialog}
+        aria-labelledby="quote-success-dialog-title"
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle id="quote-success-dialog-title" sx={{ bgcolor: 'primary.main', color: 'white' }}>
+          Quotation Generated Successfully
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          <Typography variant="h6" gutterBottom>
+            Your quote is ready! What would you like to do with it?
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+            Quote ID: {successQuoteData?.quoteId}
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3, width: '100%' }}>
+            <Box sx={{ flex: 1 }}>
+              <Button
+                fullWidth
+                variant="contained"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadQuotePdf}
+                sx={{ py: 2 }}
+              >
+                Download PDF
+              </Button>
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Button
+                fullWidth
+                variant="contained"
+                color="success"
+                startIcon={<WhatsAppIcon />}
+                onClick={handleShareToWhatsApp}
+                sx={{ py: 2 }}
+              >
+                Share via WhatsApp
+              </Button>
+            </Box>
+          </Box>
+          {/* Phone number alert message removed as requested */}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleNewQuote} variant="contained" color="secondary" sx={{ mr: 1 }}>
+            New Quote
+          </Button>
+          <Button onClick={handleCloseQuoteSuccessDialog} color="primary">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Paper>
   );
 };

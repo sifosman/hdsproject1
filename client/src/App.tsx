@@ -118,6 +118,7 @@ function App() {
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/optimizer" element={<Optimizer />} />
               <Route path="/upload" element={<WhatsAppUpload />} />
+              <Route path="/cutlist-edit/new" element={<CutlistEdit />} />
               <Route path="/cutlist-edit/:id" element={<CutlistEdit />} />
               <Route path="/cutlist-demo" element={<CutlistDemo />} />
               <Route path="*" element={<NotFound />} />

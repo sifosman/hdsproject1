@@ -29,6 +29,9 @@ router.get('/view/:id', cutlistController.viewCutlistById as RequestHandler);
 // Route to update a cutlist's data
 router.post('/update/:id', cutlistController.updateCutlistById as RequestHandler);
 
+// Route to reprocess an existing cutlist to fix quantities
+router.put('/reprocess/:id', cutlistController.reprocessCutlistById as RequestHandler);
+
 // Route to create a cutlist from n8n data
 router.post('/n8n-data', cutlistController.createFromN8nData as RequestHandler);
 

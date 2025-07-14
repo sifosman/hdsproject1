@@ -39,6 +39,8 @@ const upload = (0, multer_1.default)({
 router.get('/view/:id', cutlist_controller_1.cutlistController.viewCutlistById);
 // Route to update a cutlist's data
 router.post('/update/:id', cutlist_controller_1.cutlistController.updateCutlistById);
+// Route to reprocess an existing cutlist to fix quantities
+router.put('/reprocess/:id', cutlist_controller_1.cutlistController.reprocessCutlistById);
 // Route to create a cutlist from n8n data
 router.post('/n8n-data', cutlist_controller_1.cutlistController.createFromN8nData);
 // Route to get cutlist data as JSON

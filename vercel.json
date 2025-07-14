@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "public": true,
   "builds": [
     {
       "src": "server/dist/index.js",
@@ -20,6 +21,30 @@
         "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-token"
       },
       "continue": true
+    },
+    {
+      "src": "/api/ocr-test",
+      "dest": "/api/ocr-test.js"
+    },
+    {
+      "src": "/api/parse-ocr",
+      "dest": "/api/parse-ocr.js"
+    },
+    {
+      "src": "/api/test-ocr-parser",
+      "dest": "/api/test-ocr-parser.js"
+    },
+    {
+      "src": "/api/parse-ocr-info",
+      "dest": "/api/parse-ocr-info.js"
+    },
+    {
+      "src": "/api/test-quantity-fix",
+      "dest": "/api/test-quantity-fix.js"
+    },
+    {
+      "src": "/api/trace-quantity-flow",
+      "dest": "/api/trace-quantity-flow.js"
     },
     {
       "src": "/api/cutlist/view/(.*)",

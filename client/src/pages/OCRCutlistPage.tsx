@@ -49,6 +49,7 @@ interface CutlistData {
   cutPieces: CutPiece[];
   materials: Material[];
   unit: string;
+  rawText?: string; // Add rawText to store the OCR raw text
 }
 
 const OCRCutlistPage: React.FC = () => {
@@ -70,8 +71,15 @@ const OCRCutlistPage: React.FC = () => {
     { label: 'Optimize', icon: <SendIcon /> }
   ];
   
-  const handleProcessComplete = (data: CutlistData) => {
-    setCutlistData(data);
+  const handleProcessComplete = (data: any) => {
+    // Include rawText in the cutlistData
+    const enhancedData: CutlistData = {
+      ...data,
+      rawText: data.rawText || ''
+    };
+    
+    console.log('OCR processing complete with rawText:', enhancedData.rawText?.length || 0, 'characters');
+    setCutlistData(enhancedData);
     setActiveStep(1); // Move to edit step
   };
   

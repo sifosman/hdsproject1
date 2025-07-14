@@ -107,7 +107,7 @@ export const sendWhatsAppConfirmation = async (
  * @returns Formatted WhatsApp message
  */
 const formatWhatsAppMessage = (data: CutlistData, customerName: string, projectName: string): string => {
-  let message = `Hello ${customerName},\n\n`;
+  let message = `Great!`;
   message += `We've received your cutting list for project "${projectName}" and processed it. Please confirm if the following details are correct:\n\n`;
   
   // Add stock pieces
@@ -125,7 +125,7 @@ const formatWhatsAppMessage = (data: CutlistData, customerName: string, projectN
   message += `\nTotal Stock Pieces: ${data.stockPieces.reduce((sum, p) => sum + p.quantity, 0)}\n`;
   message += `Total Cut Pieces: ${data.cutPieces.reduce((sum, p) => sum + p.quantity, 0)}\n\n`;
   
-  message += `Please reply with "YES" to confirm or "NO" if any changes are needed.\n\n`;
+  
   message += `Thank you,\nHDS Group Cutlist Team`;
   
   return message;

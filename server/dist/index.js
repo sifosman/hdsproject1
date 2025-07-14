@@ -28,6 +28,7 @@ const n8n_routes_1 = __importDefault(require("./routes/n8n.routes"));
 const webhook_direct_routes_1 = __importDefault(require("./routes/webhook-direct.routes"));
 const debug_routes_1 = __importDefault(require("./routes/debug.routes"));
 const supabase_routes_1 = __importDefault(require("./routes/supabase.routes"));
+const diagnostic_routes_1 = require("./routes/diagnostic.routes");
 // Load environment variables
 dotenv_1.default.config();
 // Create Express app
@@ -55,6 +56,7 @@ app.use('/api/webhook', webhook_direct_routes_1.default);
 app.use('/api/debug', debug_routes_1.default);
 app.use('/api/iqretail', iqretail_routes_1.default);
 app.use('/api/supabase', supabase_routes_1.default);
+app.use('/api/diagnostic', diagnostic_routes_1.diagnosticRoutes);
 // Direct test endpoint for n8n integration
 app.get('/api/direct-test', (req, res) => {
     res.status(200).json({

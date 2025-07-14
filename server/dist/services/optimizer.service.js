@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importFromIQ = exports.generateIQExport = exports.generatePdf = exports.optimizeCuttingLayout = exports.prepareOptimizationData = void 0;
+exports.generateQuotePdf = exports.importFromIQ = exports.generateIQExport = exports.generatePdf = exports.optimizeCuttingLayout = exports.prepareOptimizationData = void 0;
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -327,6 +327,25 @@ const generatePdf = (solution, unit, cutWidth = 3, layout = 0) => {
     // Add detailed summary information
     const totalStockPieces = solution.stockPieces.length;
     const totalCutPieces = solution.stockPieces.reduce((sum, sp) => sum + sp.cutPieces.length, 0);
+    // Calculate basic solution properties
+    // Calculate total edging required in mm
+    let totalEdging = 0;
+    solution.stockPieces.forEach((sp) => {
+        sp.cutPieces.forEach((cp) => {
+            // Count edges that need edging (L1, L2, W1, W2)
+            const edgingNeeded = [
+                cp.edgeL1 ? cp.length : 0,
+                cp.edgeL2 ? cp.length : 0,
+                cp.edgeW1 ? cp.width : 0,
+                cp.edgeW2 ? cp.width : 0
+            ].reduce((sum, val) => sum + val, 0);
+            totalEdging += edgingNeeded;
+        });
+    });
+    // Convert edging to meters and calculate cost
+    const EDGING_PRICE_PER_METER = 14; // R14 per meter
+    const totalEdgingMeters = totalEdging / 1000;
+    const edgingCost = totalEdgingMeters * EDGING_PRICE_PER_METER;
     // Calculate total area and waste
     let totalStockArea = 0;
     let totalCutArea = 0;
@@ -841,3 +860,296 @@ const importFromIQ = (iqData) => {
     };
 };
 exports.importFromIQ = importFromIQ;
+// Helper to safely format numbers. Returns '-' if value is null/undefined/NaN
+const safeFixed = (value, digits = 2) => {
+    const num = Number(value);
+    return isFinite(num) ? num.toFixed(digits) : '-';
+};
+// Generate a PDF for quotations
+const generateQuotePdf = (quoteData) => {
+    const { quoteId, customerName, projectName, date, sections, grandTotal, branchData, bankingDetails } = quoteData;
+    // Create PDF document
+    const doc = new pdfkit_1.default({ size: 'A4', margin: 50 });
+    // (Removed branch header from top)
+    // Generate a unique ID for this PDF
+    const pdfId = quoteId || `Q-${Date.now()}`;
+    // Setup buffer to store PDF content
+    const buffers = [];
+    doc.on('data', buffers.push.bind(buffers));
+    // We'll store the final buffer here
+    let pdfBuffer = null;
+    doc.on('end', () => {
+        pdfBuffer = Buffer.concat(buffers);
+    });
+    // Add HDS branding header
+    doc.rect(50, 50, doc.page.width - 100, 60)
+        .fillAndStroke('#003366', '#000000');
+    doc.fontSize(24)
+        .fillColor('#FFFFFF')
+        .text('HDS Group Quotation', 50, 65, { align: 'center', width: doc.page.width - 100 });
+    // Set default text color to solid black for all content
+    doc.fillColor('#000000');
+    // Add quote details
+    doc.moveDown(1.5);
+    doc.fontSize(12).fillColor('#000000');
+    // Create a two-column layout for quote details
+    const detailsStartY = doc.y;
+    const detailsLeftWidth = 250;
+    const detailsRightX = 300;
+    // Left column: Quote details
+    doc.text(`Quote Reference: ${pdfId}`, 50, detailsStartY);
+    doc.text(`Date: ${new Date(date).toLocaleDateString()}`, 50, detailsStartY + 20);
+    doc.text(`Customer: ${customerName}`, 50, detailsStartY + 40);
+    doc.text(`Project: ${projectName}`, 50, detailsStartY + 60);
+    // Calculate grand total and edging costs first so we can display on first page
+    const EDGING_PRICE_PER_METER = 14; // R14 per meter
+    let totalEdgingMeters = 0;
+    let totalEdgingCost = 0;
+    // Calculate initial grand total from board costs
+    let boardTotal = sections.reduce((sum, section) => sum + (section.sectionTotal || 0), 0);
+    boardTotal = parseFloat(boardTotal.toFixed(2));
+    // Calculate edging costs for each section
+    sections.forEach((section) => {
+        if (section.edging && section.edging.totalEdging > 0) {
+            // Convert from mm to meters
+            const edgingMeters = section.edging.totalEdging / 1000;
+            totalEdgingMeters += edgingMeters;
+            // Calculate edging cost
+            const edgingCost = edgingMeters * EDGING_PRICE_PER_METER;
+            // Store edging cost in section for display
+            section.edgingCost = parseFloat(edgingCost.toFixed(2));
+        }
+        else {
+            section.edgingCost = 0;
+        }
+    });
+    totalEdgingCost = parseFloat((totalEdgingMeters * EDGING_PRICE_PER_METER).toFixed(2));
+    // Calculate final grand total with edging included
+    const finalTotal = boardTotal + totalEdgingCost;
+    // Right column: Project information only (grand total will be moved to the bottom)
+    const infoWidth = 200;
+    const infoHeight = 80;
+    doc.rect(detailsRightX, detailsStartY, infoWidth, infoHeight)
+        .fillAndStroke('#e6e6e6', '#000000');
+    doc.fontSize(14).fillColor('#000000');
+    doc.text('PROJECT DETAILS', detailsRightX + 10, detailsStartY + 10, { align: 'center', width: infoWidth - 20 });
+    doc.fontSize(12).fillColor('#000000');
+    doc.text(`Customer: ${customerName}`, detailsRightX + 10, detailsStartY + 30, { width: infoWidth - 20 });
+    doc.text(`Project: ${projectName}`, detailsRightX + 10, detailsStartY + 50, { width: infoWidth - 20 });
+    // Continue with main content
+    doc.y = Math.max(doc.y, detailsStartY + infoHeight + 50); // Ensure we're past the details section
+    // Removed 'Cutlist Summary' header as requested
+    doc.moveDown(0.5);
+    // For each material section
+    sections.forEach((section, index) => {
+        const { material, boardSize, boardsNeeded, pricePerBoard, sectionTotal, cutPieces, wastage, edging } = section;
+        // Material header with clearer styling
+        doc.rect(50, doc.y, doc.page.width - 100, 30)
+            .fillAndStroke('#e6e6e6', '#000000');
+        doc.fontSize(12).fillColor('#000000')
+            .text(`Material ${index + 1}: ${material} - ${boardSize}`, 60, doc.y - 22, { align: 'left' });
+        doc.moveDown(1.5);
+        // Create a table for this section's details
+        const startY = doc.y;
+        const colWidths = [200, 100, 100, 100];
+        const rowHeight = 25;
+        // Header row
+        doc.rect(50, startY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight)
+            .fillAndStroke('#cccccc', '#000000');
+        doc.fontSize(10).fillColor('#000000');
+        doc.text('Description', 55, startY + 8, { width: colWidths[0] - 10 });
+        doc.text('Board Size', 55 + colWidths[0], startY + 8, { width: colWidths[1] - 10 });
+        doc.text('Quantity', 55 + colWidths[0] + colWidths[1], startY + 8, { width: colWidths[2] - 10 });
+        doc.text('Price', 55 + colWidths[0] + colWidths[1] + colWidths[2], startY + 8, { width: colWidths[3] - 10 });
+        // Data row
+        let currentY = startY + rowHeight;
+        // Safely render values even if some fields are missing in the API payload
+        doc.rect(50, currentY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight)
+            .stroke();
+        doc.text(material !== null && material !== void 0 ? material : '-', 55, currentY + 8, { width: colWidths[0] - 10 });
+        doc.text(boardSize !== null && boardSize !== void 0 ? boardSize : '-', 55 + colWidths[0], currentY + 8, { width: colWidths[1] - 10 });
+        const boardsNeededDisplay = boardsNeeded !== undefined && boardsNeeded !== null ? boardsNeeded.toString() : '-';
+        doc.text(boardsNeededDisplay, 55 + colWidths[0] + colWidths[1], currentY + 8, { width: colWidths[2] - 10 });
+        const priceDisplay = pricePerBoard !== undefined && pricePerBoard !== null ? `R ${safeFixed(pricePerBoard)}` : '-';
+        doc.text(priceDisplay, 55 + colWidths[0] + colWidths[1] + colWidths[2], currentY + 8, { width: colWidths[3] - 10 });
+        currentY += rowHeight;
+        // Section total
+        doc.rect(50, currentY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight)
+            .stroke();
+        doc.fontSize(10).fillColor('#000000');
+        doc.text('Board Total:', 55, currentY + 8, { width: colWidths[0] + colWidths[1] + colWidths[2] - 10 });
+        const sectionTotalDisplay = sectionTotal !== undefined && sectionTotal !== null ? `R ${safeFixed(sectionTotal)}` : '-';
+        doc.text(sectionTotalDisplay, 55 + colWidths[0] + colWidths[1] + colWidths[2], currentY + 8, { width: colWidths[3] - 10 });
+        currentY += rowHeight;
+        // Add edging information in the same section as boards (if available)
+        if (edging && edging.totalEdging > 0) {
+            // Edging row
+            doc.rect(50, currentY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight)
+                .stroke();
+            const edgingMeters = (edging.totalEdging / 1000).toFixed(2);
+            const edgingCost = section.edgingCost !== undefined ? section.edgingCost.toFixed(2) : (parseFloat(edgingMeters) * EDGING_PRICE_PER_METER).toFixed(2);
+            doc.fontSize(10).fillColor('#000000');
+            doc.text(`Edging (${edgingMeters}m @ R${EDGING_PRICE_PER_METER}/m):`, 55, currentY + 8, { width: colWidths[0] + colWidths[1] + colWidths[2] - 10 });
+            doc.text(`R ${edgingCost}`, 55 + colWidths[0] + colWidths[1] + colWidths[2], currentY + 8, { width: colWidths[3] - 10 });
+            currentY += rowHeight;
+            // Combined section total (boards + edging)
+            doc.rect(50, currentY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight)
+                .fillAndStroke('#e6e6e6', '#000000');
+            doc.fontSize(10).fillColor('#000000');
+            doc.text('Section Total:', 55, currentY + 8, { width: colWidths[0] + colWidths[1] + colWidths[2] - 10 });
+            const combinedTotal = (parseFloat(sectionTotal || '0') + parseFloat(edgingCost)).toFixed(2);
+            doc.text(`R ${combinedTotal}`, 55 + colWidths[0] + colWidths[1] + colWidths[2], currentY + 8, { width: colWidths[3] - 10 });
+        }
+        // Optimization statistics section has been removed as requested
+        // We've already included edging in the board section, so we don't need a separate edging summary
+        doc.moveDown(2);
+        // Cutting diagrams section has been removed as requested
+        doc.moveDown(2);
+    });
+    // Add quote summary (moved up as requested, no longer on a separate page)
+    doc.moveDown(2);
+    // Center the Quote Summary headline properly
+    const pageWidth = doc.page.width - 100; // Account for margins
+    doc.fontSize(14).fillColor('#000000');
+    doc.text('Quote Summary', 50, doc.y, { align: 'center', width: pageWidth });
+    doc.moveDown(1);
+    // Create a summary table
+    const summaryStartY = doc.y;
+    const summaryColWidth = (doc.page.width - 100) / 2;
+    const summaryRowHeight = 25;
+    // Table header
+    doc.rect(50, summaryStartY, summaryColWidth * 2, summaryRowHeight)
+        .fillAndStroke('#cccccc', '#000000');
+    doc.fontSize(12).fillColor('#000000');
+    doc.text('Description', 60, summaryStartY + 8);
+    doc.text('Amount', 60 + summaryColWidth, summaryStartY + 8);
+    let summaryY = summaryStartY + summaryRowHeight;
+    // Board costs row
+    doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight).stroke();
+    doc.text('Total Board Cost', 60, summaryY + 8);
+    doc.text(`R ${boardTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
+    summaryY += summaryRowHeight;
+    // Edging costs row
+    doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight).stroke();
+    doc.text(`Total Edging Cost (${totalEdgingMeters.toFixed(2)}m @ R${EDGING_PRICE_PER_METER}/m)`, 60, summaryY + 8);
+    doc.text(`R ${totalEdgingCost.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
+    summaryY += summaryRowHeight;
+    // Grand total row - highlighted
+    doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 10)
+        .fillAndStroke('#003366', '#000000');
+    // Ensure the total text is visible with proper positioning
+    doc.fontSize(14).fillColor('#FFFFFF');
+    doc.text('GRAND TOTAL', 60, summaryY + 12, { continued: false });
+    doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 12, { continued: false });
+    // Calculate how much space we need for branch and banking details combined
+    const branchInfoHeight = branchData ? 100 : 0; // Approximate height for branch info box
+    const bankingDetailsCount = bankingDetails ? Object.keys(bankingDetails).filter(k => {
+        const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'fx_branch'];
+        return !excludeKeys.includes(k) && bankingDetails[k];
+    }).length : 1;
+    const bankingDetailsHeight = 50 + (bankingDetailsCount * 18); // Header + lines
+    const footerHeight = 50; // Space for footer
+    const minimumSpaceNeeded = branchInfoHeight + bankingDetailsHeight + footerHeight;
+    // Check available space
+    const remainingSpace = doc.page.height - doc.y - 50; // 50 is bottom margin
+    // Only add a page break if we absolutely need it AND we're not at the top of a page
+    if (remainingSpace < minimumSpaceNeeded && doc.y > 100) {
+        doc.addPage();
+    }
+    // Proceed directly to branch details without extra spacing to avoid blank pages
+    let branchBlockY = doc.y + 10;
+    if (branchData) {
+        // Draw a light box for branch info
+        doc.rect(50, branchBlockY, doc.page.width - 100, 70).fillAndStroke('#f5f5f5', '#003366');
+        doc.fontSize(12).fillColor('#003366').font('Helvetica-Bold');
+        doc.text(branchData.trading_as || branchData.name || 'Branch', 60, branchBlockY + 10, { width: doc.page.width - 120 });
+        doc.fontSize(9).fillColor('#333333').font('Helvetica');
+        let y = branchBlockY + 28;
+        // List of keys to exclude from rendering (internal IDs, metadata, etc.)
+        const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'branch_id', 'branch_number'];
+        // Define pretty labels for known fields
+        const prettyLabels = {
+            trading_as: 'Trading As',
+            name: 'Name',
+            address1: 'Address 1',
+            address2: 'Address 2',
+            city: 'City',
+            state: 'State',
+            zip: 'ZIP',
+            phone: 'Phone',
+            email: 'Email',
+            website: 'Website',
+            vat: 'VAT Number',
+            registration: 'Company Registration',
+            notes: 'Notes',
+            whatsapp: 'WhatsApp',
+            // Add more known fields as needed
+        };
+        // Render all key/value pairs except excluded ones and name/trading_as (already shown)
+        Object.keys(branchData).forEach((key) => {
+            if (excludeKeys.includes(key) || key === 'trading_as' || key === 'name')
+                return;
+            const value = branchData[key];
+            if (!value)
+                return;
+            const label = prettyLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            doc.text(`${label}: ${value}`, 60, y, { width: doc.page.width - 120 });
+            y += 12;
+        });
+        branchBlockY = y + 12;
+    }
+    // Add payment details and terms - all together to prevent pagination issues
+    doc.fontSize(12).fillColor('#000000');
+    doc.text('Banking Details', 50, branchBlockY + 10);
+    doc.fontSize(10);
+    // First collect all banking detail lines
+    const bankingLines = [];
+    if (bankingDetails) {
+        const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'fx_branch'];
+        const prettyLabels = {
+            account_holder: 'Account Holder',
+            bank: 'Bank',
+            account_number: 'Account Number',
+            branch_code: 'Branch Code',
+            account_type: 'Account Type',
+            reference: 'Reference',
+            swift_code: 'SWIFT Code',
+            iban: 'IBAN',
+            notes: 'Notes',
+            // Add more as needed
+        };
+        Object.keys(bankingDetails).forEach((key) => {
+            if (excludeKeys.includes(key))
+                return;
+            const value = bankingDetails[key];
+            if (!value)
+                return;
+            const label = prettyLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            bankingLines.push(`${label}: ${value}`);
+        });
+    }
+    else {
+        bankingLines.push('No banking details available for this branch. Please contact us for payment information.');
+    }
+    // Now render all banking details as a single text block with line breaks
+    const bankingText = bankingLines.join('\n');
+    doc.text(bankingText, 50, branchBlockY + 35, { width: doc.page.width - 100 });
+    // Add footer
+    const footerY = doc.page.height - 50;
+    doc.fontSize(8).fillColor('#000000');
+    doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.', 50, footerY, { align: 'center', width: doc.page.width - 100 });
+    // Finalize PDF
+    doc.end();
+    // We need to wait for the PDF to be fully generated
+    return new Promise((resolve) => {
+        // Wait for the PDF to be fully generated
+        doc.on('end', () => {
+            // Return the buffer and ID
+            resolve({
+                buffer: Buffer.concat(buffers),
+                id: pdfId
+            });
+        });
+    });
+};
+exports.generateQuotePdf = generateQuotePdf;

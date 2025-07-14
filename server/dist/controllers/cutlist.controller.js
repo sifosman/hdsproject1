@@ -126,6 +126,18 @@ const getCutlistData = (req, res) => __awaiter(void 0, void 0, void 0, function*
             }
             console.log('Original cutlist from MongoDB:', JSON.stringify(cutlist, null, 2));
             console.log('Original dimensions:', JSON.stringify(cutlist.dimensions, null, 2));
+            // Add detailed logging to debug quantity values
+            console.log('QUANTITY DEBUG - Dimensions quantities before mapping:');
+            if (cutlist.dimensions && Array.isArray(cutlist.dimensions)) {
+                cutlist.dimensions.forEach((dim, index) => {
+                    console.log(`Dimension ${index}: quantity=${dim.quantity}, description=${dim.description}`);
+                    console.log(`  - quantity type: ${typeof dim.quantity}`);
+                    console.log(`  - raw value: ${JSON.stringify(dim.quantity)}`);
+                });
+            }
+            else {
+                console.log('No dimensions array found!');
+            }
             // Create a modified response with dimensions mapped to cutPieces for frontend compatibility
             const responseData = Object.assign(Object.assign({}, cutlist.toObject()), { cutPieces: cutlist.dimensions || [] // Map dimensions to cutPieces for frontend
              });
@@ -234,12 +246,43 @@ const createFromN8nData = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // If we don't have cutlist data directly, but we have OCR text, create a new cutlist
         if (!cutlistData && ocrText) {
             // Process the OCR text to extract dimensions with better logging
+            console.log('================ QUANTITY DEBUG TRACE ================');
             console.log('Creating cutlist from OCR text');
             console.log('OCR Text to process:', ocrText);
-            const { processOcrText } = require('../services/ocr-disabled.service');
-            const ocrResults = processOcrText(ocrText);
-            console.log('Extracted dimensions from OCR text:', JSON.stringify(ocrResults.dimensions, null, 2));
+            // Import services
+            const { parseOCRText } = require('../services/botsailor.service');
+            console.log('Using improved parser from botsailor.service');
+            console.log('Parser version: enhanced with quantity extraction');
+            const parsedResults = parseOCRText(ocrText);
+            console.log('Raw parser output:');
+            console.log(JSON.stringify(parsedResults, null, 2));
+            // Map the results to the format expected by the rest of the code
+            // Detailed quantity logging before mapping
+            console.log('\nBEFORE MAPPING - Cut pieces with quantities from parser:');
+            parsedResults.cutPieces.forEach((piece, index) => {
+                console.log(`Piece ${index + 1}: ${piece.width}x${piece.length}, Qty=${piece.quantity}, Type=${typeof piece.quantity}`);
+            });
+            const ocrResults = {
+                rawText: ocrText,
+                dimensions: parsedResults.cutPieces.map((piece) => {
+                    const mappedQuantity = piece.quantity !== undefined && piece.quantity !== null ? Number(piece.quantity) : 1;
+                    console.log(`Mapping piece ${piece.width}x${piece.length}: original qty=${piece.quantity}, mapped qty=${mappedQuantity}`);
+                    return {
+                        width: piece.width,
+                        length: piece.length,
+                        quantity: mappedQuantity, // Only default to 1 if quantity is undefined/null
+                        description: piece.description || ''
+                    };
+                }),
+                unit: parsedResults.unit || 'mm'
+            };
+            console.log('\nAFTER MAPPING - Final dimensions array:');
+            console.log(JSON.stringify(ocrResults.dimensions, null, 2));
             console.log('Number of dimensions extracted:', ocrResults.dimensions.length);
+            // Count how many dimensions have quantity = 1 vs other quantities
+            const qtyOneCount = ocrResults.dimensions.filter((d) => d.quantity === 1).length;
+            const otherQtyCount = ocrResults.dimensions.length - qtyOneCount;
+            console.log(`Quantity stats: ${qtyOneCount} dimensions with qty=1, ${otherQtyCount} with other quantities`);
             // Create default stock piece (2000 x 1200 with infinite quantity)
             const stockPieces = [{
                     id: `stock-${Date.now()}`,
@@ -255,7 +298,7 @@ const createFromN8nData = (req, res) => __awaiter(void 0, void 0, void 0, functi
                     thickness: 16 // Default thickness in mm
                 }];
             // Create a new cutlist with the extracted dimensions and defaults for other fields
-            newCutlist = new Cutlist({
+            const cutlistData = {
                 rawText: ocrText,
                 unit: ocrResults.unit || 'mm',
                 dimensions: ocrResults.dimensions || [], // These are the cut pieces extracted from OCR
@@ -264,7 +307,12 @@ const createFromN8nData = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 customerName: senderName || 'WhatsApp User',
                 projectName: 'Cutting List from WhatsApp',
                 phoneNumber: phoneNumber || '',
+            };
+            console.log('\nBEFORE MONGOOSE - Cutlist dimensions to save:');
+            cutlistData.dimensions.forEach((dim, idx) => {
+                console.log(`Dimension ${idx + 1}: ${dim.width}x${dim.length}, Qty=${dim.quantity}, Type=${typeof dim.quantity}`);
             });
+            newCutlist = new Cutlist(cutlistData);
             yield newCutlist.save();
             console.log('Created new cutlist with ID:', newCutlist._id);
             // Automatically send the cutlist link via WhatsApp
@@ -312,11 +360,37 @@ const createFromN8nData = (req, res) => __awaiter(void 0, void 0, void 0, functi
         });
     }
 });
+// Reprocess an existing cutlist to fix quantities
+const reprocessCutlistById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const cutlist = yield Cutlist.findById(req.params.id);
+        if (!cutlist) {
+            return res.status(404).json({ success: false, message: 'Cutlist not found' });
+        }
+        // Reprocess the OCR text using our corrected service
+        const { processOcrText } = require('../services/ocr-disabled.service');
+        const ocrResults = processOcrText(cutlist.rawText);
+        // Update the dimensions with the reprocessed data
+        cutlist.dimensions = ocrResults.dimensions;
+        // Save the updated cutlist
+        yield cutlist.save();
+        res.json({
+            success: true,
+            message: 'Cutlist reprocessed successfully',
+            cutlist: cutlist
+        });
+    }
+    catch (error) {
+        console.error('Error reprocessing cutlist:', error);
+        res.status(500).json({ success: false, message: 'Error reprocessing cutlist' });
+    }
+});
 // Export controller as an object with methods
 exports.cutlistController = {
     viewCutlistById,
     updateCutlistById,
+    createFromN8nData,
     getCutlistData,
     getAllCutlists,
-    createFromN8nData
+    reprocessCutlistById
 };
