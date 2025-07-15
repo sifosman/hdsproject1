@@ -167,20 +167,34 @@ export function normalizeCutPieces(rawPieces: any[], DEFAULT_MATERIAL_CATEGORIES
     } else {
       // Normal cut piece - extract quantity from description if not explicitly provided
       const description = piece.description || piece.name || '';
-      const quantity = piece.quantity !== undefined ? piece.quantity : extractQuantityFromDescription(description);
       
-      normalizedPieces.push({
+      // First, check if quantity is already set in the piece data
+      // If not, extract it from the description
+      let quantity = piece.quantity;
+      if (quantity === undefined || quantity === null || quantity === 1) {
+        const extractedQty = extractQuantityFromDescription(description);
+        if (extractedQty !== null && extractedQty > 1) {
+          quantity = extractedQty;
+          console.log(`Extracted quantity ${quantity} from description: "${description}"`);
+        } else {
+          quantity = 1; // Default to 1 if no quantity found
+        }
+      }
+      
+      // Create the normalized piece with the correct quantity
+      const normalizedPiece: CutPiece = {
         id: piece.id || `piece-${Date.now()}-${normalizedPieces.length}`,
         width: piece.width,
         length: piece.length,
-        quantity: quantity || 1, // Ensure we have at least 1
+        quantity: quantity,
         name: description,
         description: description, // Keep the original description
         edging: piece.edging,
         material: currentMaterial
-      });
+      };
       
-      console.log(`Normalized piece: ${piece.width}x${piece.length} x${quantity || 1} (${currentMaterial}) - "${description}"`);
+      normalizedPieces.push(normalizedPiece);
+      console.log(`Normalized piece: ${piece.width}x${piece.length} x${quantity} (${currentMaterial}) - "${description}"`);
     }
   }
 
