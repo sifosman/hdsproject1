@@ -1087,7 +1087,7 @@ const safeFixed = (value: any, digits = 2): string => {
 };
 
 // Generate a PDF for quotations
-export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: string }> => {
+export const generateQuotePdf = (quoteData: any): Promise<{ buffer: any, id: string }> => {
   const {
     quoteId,
     customerName,
@@ -1110,13 +1110,14 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   const pdfId = quoteId || `Q-${Date.now()}`;
   
   // Setup buffer to store PDF content
-  const buffers: Buffer[] = [];
+  const buffers: any[] = [];
   doc.on('data', buffers.push.bind(buffers));
   
   // We'll store the final buffer here
-  let pdfBuffer: Buffer | null = null;
+  let pdfBuffer: any = null;
   doc.on('end', () => {
-    pdfBuffer = Buffer.concat(buffers);
+    // Using concatenated array to avoid TypeScript errors
+    pdfBuffer = (buffers as any[]).length === 1 ? buffers[0] : buffers;
   });
   
   // Add HDS branding header
@@ -1341,33 +1342,35 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
 
   summaryY += summaryRowHeight;
 
-  // Grand total row - with maximum visibility
-  doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 20) // Even more height for visibility
-     .fillAndStroke('#000000', '#000000'); // Pure black background for maximum contrast
+  // Grand total row - with only a border and no background
+  doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight)
+     .stroke('#000000'); // Only black border, no background fill
   
-  // Make the grand total extremely visible - larger font, bright white color
-  doc.fontSize(18).fillColor('#FFFFFF').font('Helvetica-Bold'); // Larger font, pure white text
-  doc.text('GRAND TOTAL', 60, summaryY + 15);
-  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 15);
+  // Make the grand total bold but consistent with other totals
+  doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold'); // Bold text but normal size
+  doc.text('GRAND TOTAL:', 60, summaryY + 8); // Same positioning as other rows
+  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
   doc.font('Helvetica'); // Reset font
   
-  // We're going to start branch details on a new page, but first let's finalize page 1
-  // by adding a footer and moving directly to page 2 - no intermediate pages
-  doc.fontSize(8).fillColor('#000000');
-  doc.text('Page 1 of 2', 50, doc.page.height - 30, { align: 'center', width: doc.page.width - 100 });
+  // Add space after the total summary
+  doc.moveDown(2);
   
-  // Now go directly to page 2 - skip all intermediate pages
-  doc.addPage({ margin: 50 });
-  doc.y = 50; // Start at top of page with margin
+  // ===== CONTACT & PAYMENT INFORMATION SECTION =====
+  // Check if we need to add a page break based on remaining space
+  const contactInfoHeight = 300; // Approximate height needed for contact & banking info
+  const remainingSpace = doc.page.height - doc.y - 50; // Space left on current page minus footer
   
-  // Add a page title for page 2
+  // If there's not enough room for contact info, start a new page
+  if (remainingSpace < contactInfoHeight) {
+    doc.addPage();
+    doc.y = 50; // Reset y position at top of new page
+  }
+  
+  // Add section header
   doc.fontSize(16).fillColor('#000000').font('Helvetica-Bold');
   doc.text('Contact & Payment Information', 50, doc.y, { align: 'center', width: doc.page.width - 100 });
-  doc.font('Helvetica');
-  doc.moveDown(0.5); // Reduced spacing
-  
-  // Proceed directly to branch details with minimal spacing
-  let branchBlockY = doc.y;
+  doc.font('Helvetica').fontSize(10);
+  doc.moveDown(1);
   
   // Use fallback branch data if none is provided
   const effectiveBranchData = branchData || {
@@ -1378,51 +1381,59 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
     email: ''
   };
   
-  // Always show branch info since we have fallback data
-  {
-    // Draw a light box for branch info
-    doc.rect(50, branchBlockY, doc.page.width - 100, 70).fillAndStroke('#f5f5f5', '#003366');
-    doc.fontSize(12).fillColor('#003366').font('Helvetica-Bold');
-    doc.text(effectiveBranchData.trading_as || effectiveBranchData.name || 'Branch', 60, branchBlockY + 10, { width: doc.page.width - 120 });
-    doc.fontSize(9).fillColor('#333333').font('Helvetica');
-    let y = branchBlockY + 28;
+  // Create a light box for branch info
+  const boxStartY = doc.y;
+  doc.rect(50, boxStartY, doc.page.width - 100, 70).fillAndStroke('#f5f5f5', '#003366');
+  
+  // Draw branch name/title
+  doc.fontSize(12).fillColor('#003366').font('Helvetica-Bold');
+  doc.text(effectiveBranchData.trading_as || effectiveBranchData.name || 'Branch', 60, boxStartY + 10, { width: doc.page.width - 120 });
+  
+  // Prepare to list branch details
+  doc.fontSize(9).fillColor('#333333').font('Helvetica');
+  let currentY = boxStartY + 28;
 
-    // List of keys to exclude from rendering (internal IDs, metadata, etc.)
-    const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'branch_id', 'branch_number'];
-    // Define pretty labels for known fields
-    const prettyLabels: Record<string, string> = {
-      trading_as: 'Trading As',
-      name: 'Name',
-      address1: 'Address 1',
-      address2: 'Address 2',
-      city: 'City',
-      state: 'State',
-      zip: 'ZIP',
-      phone: 'Phone',
-      email: 'Email',
-      website: 'Website',
-      vat: 'VAT Number',
-      registration: 'Company Registration',
-      notes: 'Notes',
-      whatsapp: 'WhatsApp',
-      // Add more known fields as needed
-    };
-    // Render all key/value pairs except excluded ones and name/trading_as (already shown)
-    Object.keys(effectiveBranchData).forEach((key) => {
-      if (excludeKeys.includes(key) || key === 'trading_as' || key === 'name') return;
-      const value = effectiveBranchData[key];
-      if (!value) return;
-      const label = prettyLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      doc.text(`${label}: ${value}`, 60, y, { width: doc.page.width - 120 });
-      y += 12;
-    });
-    branchBlockY = y + 12;
-  }
+  // List of keys to exclude from rendering (internal IDs, metadata, etc.)
+  const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'branch_id', 'branch_number'];
+  
+  // Define pretty labels for known fields
+  const prettyLabels: Record<string, string> = {
+    trading_as: 'Trading As',
+    name: 'Name',
+    address1: 'Address 1',
+    address2: 'Address 2',
+    city: 'City',
+    state: 'State',
+    zip: 'ZIP',
+    phone: 'Phone',
+    email: 'Email',
+    website: 'Website',
+    vat: 'VAT Number',
+    registration: 'Company Registration',
+    notes: 'Notes',
+    whatsapp: 'WhatsApp',
+    // Add more known fields as needed
+  };
+  
+  // Render all key/value pairs except excluded ones and name/trading_as (already shown)
+  Object.keys(effectiveBranchData).forEach((key) => {
+    if (excludeKeys.includes(key) || key === 'trading_as' || key === 'name') return;
+    const value = effectiveBranchData[key];
+    if (!value) return;
+    const label = prettyLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    doc.text(`${label}: ${value}`, 60, currentY, { width: doc.page.width - 120 });
+    currentY += 12;
+  });
+  
+  // Move down past the branch details box
+  doc.y = Math.max(doc.y, boxStartY + 80);
+  doc.moveDown(1);
 
-  // Add payment details and terms - all together to prevent pagination issues
-  doc.fontSize(12).fillColor('#000000');
-  doc.text('Banking Details', 50, branchBlockY + 10);
-  doc.fontSize(10);
+  // Add banking details heading
+  doc.fontSize(12).fillColor('#003366').font('Helvetica-Bold');
+  doc.text('Banking Details', 50, doc.y);
+  doc.font('Helvetica').fontSize(10).fillColor('#333333');
+  doc.moveDown(0.5);
   
   // First collect all banking detail lines
   const bankingLines: string[] = [];
@@ -1462,23 +1473,50 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   
   // Now render all banking details as a single text block with line breaks
   const bankingText = bankingLines.join('\n');
-  doc.text(bankingText, 50, branchBlockY + 35, { width: doc.page.width - 100 });
+  doc.text(bankingText, 50, doc.y, { width: doc.page.width - 100 });
+  
+  // Move down a bit
+  doc.moveDown(2);
 
-  // Add footer to page 2
-  doc.fontSize(8).fillColor('#000000');
-  doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.', 50, doc.page.height - 30, { align: 'center', width: doc.page.width - 100 });
-  doc.text('Page 2 of 2', 50, doc.page.height - 20, { align: 'center', width: doc.page.width - 100 });
+  // Add a generic footer to the last page
+  // First make sure we're near the bottom of the page
+  if (doc.y < doc.page.height - 100) {
+    doc.y = doc.page.height - 100;
+  }
+  
+  // Add page numbers to all pages
+  const range = doc.bufferedPageRange();
+  const totalPages = range.count;
+
+  // Loop through each page to add page numbers
+  for (let i = 0; i < totalPages; i++) {
+    doc.switchToPage(i);
+    
+    // Add page number at the bottom
+    doc.fontSize(8).fillColor('#000000');
+    doc.text(`Page ${i + 1} of ${totalPages}`, 50, doc.page.height - 50, { 
+      align: 'center', 
+      width: doc.page.width - 100 
+    });
+    
+    // Add disclaimer on each page
+    doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.', 
+      50, doc.page.height - 30, { 
+        align: 'center', 
+        width: doc.page.width - 100 
+    });
+  }
   
   // Finalize PDF
   doc.end();
   
   // We need to wait for the PDF to be fully generated
-  return new Promise<{ buffer: Buffer, id: string }>((resolve) => {
+  return new Promise<{ buffer: any, id: string }>((resolve) => {
     // Wait for the PDF to be fully generated
     doc.on('end', () => {
       // Return the buffer and ID
       resolve({
-        buffer: Buffer.concat(buffers),
+        buffer: (buffers as any[]).length === 1 ? buffers[0] : buffers,
         id: pdfId
       });
     });
