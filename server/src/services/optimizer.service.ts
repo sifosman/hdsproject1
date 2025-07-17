@@ -1334,22 +1334,25 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
 
   // Cutting fee row with light green background
   doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight)
-     .fillAndStroke('#e6ffe6', '#000000'); // Light green background
+     .fillAndStroke('#fffff', '#000000'); // Light green background
   doc.fillColor('#000000');
   doc.text(`Cutting Fee (R${cuttingFeePerBoard} per board × ${totalBoardsUsed} board(s))`, 60, summaryY + 8);
   doc.text(`R ${totalCuttingFee.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
 
   summaryY += summaryRowHeight;
 
-  // Grand total row - highlighted with very prominent styling
-  doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 15) // Increased height
-     .fillAndStroke('#003366', '#000000'); // Darker blue
+  // Grand total row - with maximum visibility
+  doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 20) // Even more height for visibility
+     .fillAndStroke('#000000', '#000000'); // Pure black background for maximum contrast
   
-  // Make the grand total significantly more visible
-  doc.fontSize(16).fillColor('#FFFFFF').font('Helvetica-Bold'); // Larger font
-  doc.text('GRAND TOTAL', 60, summaryY + 14);
-  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 14, { align: 'left' });
+  // Make the grand total extremely visible - larger font, bright white color
+  doc.fontSize(18).fillColor('#FFFFFF').font('Helvetica-Bold'); // Larger font, pure white text
+  doc.text('GRAND TOTAL', 60, summaryY + 15);
+  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 15);
   doc.font('Helvetica'); // Reset font
+  
+  // Add spacing after grand total for better separation
+  summaryY += summaryRowHeight + 20;
   
   // Calculate how much space we need for branch and banking details combined
   const branchInfoHeight = branchData ? 100 : 0; // Approximate height for branch info box
