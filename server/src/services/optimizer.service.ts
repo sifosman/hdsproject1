@@ -1293,14 +1293,15 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
     doc.moveDown(2);
   });
   
-  // Add quote summary (moved up as requested, no longer on a separate page)
-  doc.moveDown(2);
+  // Add quote summary (moved up with minimal spacing to maximize page use)
+  doc.moveDown(1); // Reduced from 2 to minimize space
   
   // Center the Quote Summary headline properly
   const pageWidth = doc.page.width - 100; // Account for margins
-  doc.fontSize(14).fillColor('#000000');
+  doc.fontSize(16).fillColor('#000000').font('Helvetica-Bold');
   doc.text('Quote Summary', 50, doc.y, { align: 'center', width: pageWidth });
-  doc.moveDown(1);
+  doc.font('Helvetica');
+  doc.moveDown(0.5); // Reduced from 1 to minimize space
   
   // Create a summary table
   const summaryStartY = doc.y;
@@ -1340,14 +1341,14 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
 
   summaryY += summaryRowHeight;
 
-  // Grand total row - highlighted (with deeper blue and clear white text)
-  doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 10)
-     .fillAndStroke('#00264d', '#000000');
+  // Grand total row - highlighted with very prominent styling
+  doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 15) // Increased height
+     .fillAndStroke('#003366', '#000000'); // Darker blue
   
-  // Ensure the total text is visible with proper positioning - using strong white color and bold text
-  doc.fontSize(14).fillColor('#FFFFFF').font('Helvetica-Bold');
-  doc.text('GRAND TOTAL', 60, summaryY + 12);
-  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 12);
+  // Make the grand total significantly more visible
+  doc.fontSize(16).fillColor('#FFFFFF').font('Helvetica-Bold'); // Larger font
+  doc.text('GRAND TOTAL', 60, summaryY + 14);
+  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 14, { align: 'left' });
   doc.font('Helvetica'); // Reset font
   
   // Calculate how much space we need for branch and banking details combined
@@ -1361,14 +1362,10 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   const footerHeight = 50; // Space for footer
   const minimumSpaceNeeded = branchInfoHeight + bankingDetailsHeight + footerHeight;
   
-  // Check available space
-  const remainingSpace = doc.page.height - doc.y - 50; // 50 is bottom margin
-  
-  // Instead of adding a page break, we'll consolidate all remaining content on the current page
-  // Only add a page break in the extreme case that we're already near the bottom of the page
-  if (doc.y > doc.page.height - 100) {
-    doc.addPage();
-  }
+  // Always start branch details and banking details on the next page for consistent layout
+  // This ensures we don't have a blank page 2, and that these details appear on page 2
+  doc.addPage();
+  doc.y = 50; // Reset y position to top of new page with proper margin
   
   // Proceed directly to branch details without extra spacing to avoid blank pages
   let branchBlockY = doc.y + 10;
