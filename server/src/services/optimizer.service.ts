@@ -1340,14 +1340,15 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
 
   summaryY += summaryRowHeight;
 
-  // Grand total row - highlighted
+  // Grand total row - highlighted (with deeper blue and clear white text)
   doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 10)
-     .fillAndStroke('#003366', '#000000');
+     .fillAndStroke('#00264d', '#000000');
   
-  // Ensure the total text is visible with proper positioning
-  doc.fontSize(14).fillColor('#FFFFFF');
-  doc.text('GRAND TOTAL', 60, summaryY + 12, { continued: false });
-  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 12, { continued: false });
+  // Ensure the total text is visible with proper positioning - using strong white color and bold text
+  doc.fontSize(14).fillColor('#FFFFFF').font('Helvetica-Bold');
+  doc.text('GRAND TOTAL', 60, summaryY + 12);
+  doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 12);
+  doc.font('Helvetica'); // Reset font
   
   // Calculate how much space we need for branch and banking details combined
   const branchInfoHeight = branchData ? 100 : 0; // Approximate height for branch info box
@@ -1363,8 +1364,9 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   // Check available space
   const remainingSpace = doc.page.height - doc.y - 50; // 50 is bottom margin
   
-  // Only add a page break if we absolutely need it AND we're not at the top of a page
-  if (remainingSpace < minimumSpaceNeeded && doc.y > 100) {
+  // Instead of adding a page break, we'll consolidate all remaining content on the current page
+  // Only add a page break in the extreme case that we're already near the bottom of the page
+  if (doc.y > doc.page.height - 100) {
     doc.addPage();
   }
   
@@ -1446,8 +1448,10 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   const bankingText = bankingLines.join('\n');
   doc.text(bankingText, 50, branchBlockY + 35, { width: doc.page.width - 100 });
 
-  // Add footer
-  const footerY = doc.page.height - 50;
+  // Move footer closer to the banking details to avoid orphaned text
+  // Calculate where to position the footer - ensure it's always on the same page as the banking details
+  const currentY = doc.y;
+  const footerY = Math.min(doc.page.height - 30, currentY + 40);
   doc.fontSize(8).fillColor('#000000');
   doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.', 50, footerY, { align: 'center', width: doc.page.width - 100 });
   
