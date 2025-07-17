@@ -414,14 +414,21 @@ const generatePdf = (solution, unit, cutWidth = 3, layout = 0) => {
     doc.text(`${wasteAreaConverted} ${unitLabel}`, summaryStartX + summaryColWidths[0] + 5, currentSummaryY + 8, { width: summaryColWidths[1] });
     doc.text(`${wastePercentage}% of total material`, summaryStartX + summaryColWidths[0] + summaryColWidths[1] + 5, currentSummaryY + 8, { width: summaryColWidths[2] });
     currentSummaryY += summaryRowHeight;
-    // Row 6: Layout Type
+    // Row 6: Edging Cost
+    doc.rect(summaryStartX, currentSummaryY, summaryColWidths[0] + summaryColWidths[1] + summaryColWidths[2], summaryRowHeight)
+        .stroke();
+    doc.text('Edging Cost', summaryStartX + 5, currentSummaryY + 8, { width: summaryColWidths[0] });
+    doc.text(`R ${edgingCost.toFixed(2)}`, summaryStartX + summaryColWidths[0] + 5, currentSummaryY + 8, { width: summaryColWidths[1] });
+    doc.text(`Total edging cost`, summaryStartX + summaryColWidths[0] + summaryColWidths[1] + 5, currentSummaryY + 8, { width: summaryColWidths[2] });
+    currentSummaryY += summaryRowHeight;
+    // Row 7: Layout Type
     doc.rect(summaryStartX, currentSummaryY, summaryColWidths[0] + summaryColWidths[1] + summaryColWidths[2], summaryRowHeight)
         .stroke();
     doc.text('Layout Type', summaryStartX + 5, currentSummaryY + 8, { width: summaryColWidths[0] });
     doc.text(`${layout === 0 ? 'Guillotine' : 'Nested'}`, summaryStartX + summaryColWidths[0] + 5, currentSummaryY + 8, { width: summaryColWidths[1] });
     doc.text(`Cutting algorithm used`, summaryStartX + summaryColWidths[0] + summaryColWidths[1] + 5, currentSummaryY + 8, { width: summaryColWidths[2] });
     currentSummaryY += summaryRowHeight;
-    // Row 7: Cut Width
+    // Row 8: Cut Width
     const cutWidthConverted = convertUnit(cutWidth, 0, unit).toFixed(2);
     const unitLabelSingle = unit === 0 ? 'mm' : unit === 1 ? 'in' : 'ft';
     doc.rect(summaryStartX, currentSummaryY, summaryColWidths[0] + summaryColWidths[1] + summaryColWidths[2], summaryRowHeight)
@@ -675,6 +682,12 @@ const generatePdf = (solution, unit, cutWidth = 3, layout = 0) => {
             .fillAndStroke('#FFECEC', '#000000'); // Light red background for waste
         doc.text('Waste', startX + 5, infoCurrentY + 8, { width: infoColWidths[0] });
         doc.text(`${convertUnit(wasteAreaValue, 0, unit).toFixed(2)} ${unitLabel}² (${wastePercentage}%)`, startX + infoColWidths[0] + 5, infoCurrentY + 8, { width: infoColWidths[1] });
+        // Row 4: Edging Cost
+        doc.rect(startX, infoCurrentY + rowHeight, infoColWidths[0] + infoColWidths[1], rowHeight)
+            .fillAndStroke('#F0F8FF', '#000000'); // Light blue background
+        doc.fillColor('#000000');
+        doc.text('Edging Cost', startX + 5, (infoCurrentY + rowHeight) + 8, { width: infoColWidths[0] });
+        doc.text(`R ${edgingCost.toFixed(2)}`, startX + infoColWidths[0] + 5, (infoCurrentY + rowHeight) + 8, { width: infoColWidths[1] });
     });
     // Add footer to each page
     const totalPages = solution.stockPieces.length;
@@ -784,11 +797,7 @@ const generateIQExport = (solution, unit, cutWidth = 3, layout = 0) => {
     return iqData;
 };
 exports.generateIQExport = generateIQExport;
-/**
- * Import data from IQ software
- * @param iqData The data from IQ software
- * @returns Processed data ready for optimization
- */
+// Import data from IQ software
 const importFromIQ = (iqData) => {
     if (!iqData || typeof iqData !== 'object') {
         throw new Error('Invalid IQ data format');
@@ -867,7 +876,7 @@ const safeFixed = (value, digits = 2) => {
 };
 // Generate a PDF for quotations
 const generateQuotePdf = (quoteData) => {
-    const { quoteId, customerName, projectName, date, sections, grandTotal, branchData, bankingDetails } = quoteData;
+    const { quoteId, customerName, projectName, date, sections, grandTotal, branchData, bankingDetails, edgingLength, edgingCost } = quoteData;
     // Create PDF document
     const doc = new pdfkit_1.default({ size: 'A4', margin: 50 });
     // (Removed branch header from top)
@@ -915,9 +924,11 @@ const generateQuotePdf = (quoteData) => {
             const edgingMeters = section.edging.totalEdging / 1000;
             totalEdgingMeters += edgingMeters;
             // Calculate edging cost
-            const edgingCost = edgingMeters * EDGING_PRICE_PER_METER;
+            const edgingCost = section.edgingCost !== undefined
+                ? section.edgingCost.toFixed(2)
+                : (edgingMeters * EDGING_PRICE_PER_METER).toFixed(2);
             // Store edging cost in section for display
-            section.edgingCost = parseFloat(edgingCost.toFixed(2));
+            section.edgingCost = parseFloat(edgingCost);
         }
         else {
             section.edgingCost = 0;
@@ -938,8 +949,6 @@ const generateQuotePdf = (quoteData) => {
     doc.text(`Project: ${projectName}`, detailsRightX + 10, detailsStartY + 50, { width: infoWidth - 20 });
     // Continue with main content
     doc.y = Math.max(doc.y, detailsStartY + infoHeight + 50); // Ensure we're past the details section
-    // Removed 'Cutlist Summary' header as requested
-    doc.moveDown(0.5);
     // For each material section
     sections.forEach((section, index) => {
         const { material, boardSize, boardsNeeded, pricePerBoard, sectionTotal, cutPieces, wastage, edging } = section;
@@ -987,7 +996,9 @@ const generateQuotePdf = (quoteData) => {
             doc.rect(50, currentY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight)
                 .stroke();
             const edgingMeters = (edging.totalEdging / 1000).toFixed(2);
-            const edgingCost = section.edgingCost !== undefined ? section.edgingCost.toFixed(2) : (parseFloat(edgingMeters) * EDGING_PRICE_PER_METER).toFixed(2);
+            const edgingCost = section.edgingCost !== undefined
+                ? section.edgingCost.toFixed(2)
+                : (parseFloat(edgingMeters) * EDGING_PRICE_PER_METER).toFixed(2);
             doc.fontSize(10).fillColor('#000000');
             doc.text(`Edging (${edgingMeters}m @ R${EDGING_PRICE_PER_METER}/m):`, 55, currentY + 8, { width: colWidths[0] + colWidths[1] + colWidths[2] - 10 });
             doc.text(`R ${edgingCost}`, 55 + colWidths[0] + colWidths[1] + colWidths[2], currentY + 8, { width: colWidths[3] - 10 });

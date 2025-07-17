@@ -171,6 +171,8 @@ export const generateQuote = async (req: Request, res: Response) => {
     const processedSections = [];
     const pdfSections = [];
     let grandTotal = 0;
+    let totalEdgingLength = 0;
+    let edgingCostTotal = 0;
     
     for (const section of sections) {
       const { material, cutPieces } = section;
@@ -382,6 +384,16 @@ export const generateQuote = async (req: Request, res: Response) => {
       
       console.log(`Edging calculation: Total edging required: ${totalEdging}mm`);
       
+      // Calculate edging cost (R14 per metre)
+      const edgingCost = (totalEdging / 1000) * 14;
+      
+      // Add to total edging length accumulator
+      totalEdgingLength += totalEdging;
+      
+      // Add edging cost to grand total
+      grandTotal += edgingCost;
+      edgingCostTotal += edgingCost;
+      
       // 10. Format sizes for display (use adjusted dimensions)
       const boardSize = `${length}×${width}${sizeParts[2] ? '×'+sizeParts[2] : ''}`;
       
@@ -400,8 +412,9 @@ export const generateQuote = async (req: Request, res: Response) => {
           efficiencyPercentage
         },
         edging: {
-          totalEdging,
-          edgingBreakdown
+          length: totalEdging,
+          totalEdging: totalEdging, // Add this for PDF compatibility
+          cost: edgingCost
         }
       };
       
@@ -444,7 +457,9 @@ export const generateQuote = async (req: Request, res: Response) => {
       sections: pdfSections,
       grandTotal,
       branchData: branchData || null,
-      bankingDetails: bankingDetails
+      bankingDetails: bankingDetails,
+      edgingLength: totalEdgingLength, // Total in mm
+      edgingCost: edgingCostTotal // Total cost
     });
 
     // 9. Upload PDF to Supabase "hdsquotes" bucket and get public URL

@@ -498,7 +498,15 @@ export const generatePdf = (solution: Solution, unit: number, cutWidth: number =
   doc.text(`${wastePercentage}% of total material`, summaryStartX + summaryColWidths[0] + summaryColWidths[1] + 5, currentSummaryY + 8, { width: summaryColWidths[2] });
   currentSummaryY += summaryRowHeight;
 
-  // Row 6: Layout Type
+  // Row 6: Edging Cost
+  doc.rect(summaryStartX, currentSummaryY, summaryColWidths[0] + summaryColWidths[1] + summaryColWidths[2], summaryRowHeight)
+     .stroke();
+  doc.text('Edging Cost', summaryStartX + 5, currentSummaryY + 8, { width: summaryColWidths[0] });
+  doc.text(`R ${edgingCost.toFixed(2)}`, summaryStartX + summaryColWidths[0] + 5, currentSummaryY + 8, { width: summaryColWidths[1] });
+  doc.text(`Total edging cost`, summaryStartX + summaryColWidths[0] + summaryColWidths[1] + 5, currentSummaryY + 8, { width: summaryColWidths[2] });
+  currentSummaryY += summaryRowHeight;
+
+  // Row 7: Layout Type
   doc.rect(summaryStartX, currentSummaryY, summaryColWidths[0] + summaryColWidths[1] + summaryColWidths[2], summaryRowHeight)
      .stroke();
   doc.text('Layout Type', summaryStartX + 5, currentSummaryY + 8, { width: summaryColWidths[0] });
@@ -506,7 +514,7 @@ export const generatePdf = (solution: Solution, unit: number, cutWidth: number =
   doc.text(`Cutting algorithm used`, summaryStartX + summaryColWidths[0] + summaryColWidths[1] + 5, currentSummaryY + 8, { width: summaryColWidths[2] });
   currentSummaryY += summaryRowHeight;
 
-  // Row 7: Cut Width
+  // Row 8: Cut Width
   const cutWidthConverted = convertUnit(cutWidth, 0, unit).toFixed(2);
   const unitLabelSingle = unit === 0 ? 'mm' : unit === 1 ? 'in' : 'ft';
 
@@ -861,6 +869,13 @@ export const generatePdf = (solution: Solution, unit: number, cutWidth: number =
     doc.text('Waste', startX + 5, infoCurrentY + 8, { width: infoColWidths[0] });
     doc.text(`${convertUnit(wasteAreaValue, 0, unit).toFixed(2)} ${unitLabel}² (${wastePercentage}%)`,
              startX + infoColWidths[0] + 5, infoCurrentY + 8, { width: infoColWidths[1] });
+
+    // Row 4: Edging Cost
+    doc.rect(startX, infoCurrentY + rowHeight, infoColWidths[0] + infoColWidths[1], rowHeight)
+       .fillAndStroke('#F0F8FF', '#000000'); // Light blue background
+    doc.fillColor('#000000');
+    doc.text('Edging Cost', startX + 5, (infoCurrentY + rowHeight) + 8, { width: infoColWidths[0] });
+    doc.text(`R ${edgingCost.toFixed(2)}`, startX + infoColWidths[0] + 5, (infoCurrentY + rowHeight) + 8, { width: infoColWidths[1] });
   });
 
   // Add footer to each page
@@ -990,11 +1005,7 @@ export const generateIQExport = (solution: Solution, unit: number, cutWidth: num
   return iqData;
 };
 
-/**
- * Import data from IQ software
- * @param iqData The data from IQ software
- * @returns Processed data ready for optimization
- */
+// Import data from IQ software
 export const importFromIQ = (iqData: any): { pieces: IPiece[], unit: number, width: number, layout: number } => {
   if (!iqData || typeof iqData !== 'object') {
     throw new Error('Invalid IQ data format');
@@ -1085,7 +1096,9 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
     sections,
     grandTotal,
     branchData,
-    bankingDetails
+    bankingDetails,
+    edgingLength,
+    edgingCost
   } = quoteData;
 
   // Create PDF document
@@ -1149,9 +1162,11 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
       totalEdgingMeters += edgingMeters;
       
       // Calculate edging cost
-      const edgingCost = edgingMeters * EDGING_PRICE_PER_METER;
+      const edgingCost = section.edgingCost !== undefined 
+        ? section.edgingCost.toFixed(2) 
+        : (edgingMeters * EDGING_PRICE_PER_METER).toFixed(2);
       // Store edging cost in section for display
-      section.edgingCost = parseFloat(edgingCost.toFixed(2));
+      section.edgingCost = parseFloat(edgingCost);
     } else {
       section.edgingCost = 0;
     }
@@ -1177,9 +1192,6 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   
   // Continue with main content
   doc.y = Math.max(doc.y, detailsStartY + infoHeight + 50); // Ensure we're past the details section
-  
-  // Removed 'Cutlist Summary' header as requested
-  doc.moveDown(0.5);
   
   // For each material section
   sections.forEach((section: any, index: number) => {
@@ -1244,7 +1256,9 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
          .stroke();
       
       const edgingMeters = (edging.totalEdging / 1000).toFixed(2);
-      const edgingCost = section.edgingCost !== undefined ? section.edgingCost.toFixed(2) : (parseFloat(edgingMeters) * EDGING_PRICE_PER_METER).toFixed(2);
+      const edgingCost = section.edgingCost !== undefined 
+        ? section.edgingCost.toFixed(2) 
+        : (parseFloat(edgingMeters) * EDGING_PRICE_PER_METER).toFixed(2);
       
       doc.fontSize(10).fillColor('#000000');
       doc.text(`Edging (${edgingMeters}m @ R${EDGING_PRICE_PER_METER}/m):`, 55, currentY + 8, { width: colWidths[0] + colWidths[1] + colWidths[2] - 10 });

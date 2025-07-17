@@ -26,9 +26,8 @@ function parseOCRText(text) {
     /(\d+)\s*[xX×*]\s*(\d+)/, // fallback no qty
   ];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    console.log(`Line ${i + 1}: "${line}"`);
+  lines.forEach((line, index) => {
+    console.log(`Line ${index + 1}: "${line}"`);
     let matched = false;
     let width = 0;
     let length = 0;
@@ -59,22 +58,6 @@ function parseOCRText(text) {
       }
     }
 
-    // Hybrid fallback: check for three consecutive numeric lines (vertical/columnar OCR)
-    if (!matched && i + 2 < lines.length) {
-      const n1 = parseInt(lines[i], 10);
-      const n2 = parseInt(lines[i + 1], 10);
-      const n3 = parseInt(lines[i + 2], 10);
-      if (!isNaN(n1) && !isNaN(n2) && !isNaN(n3)) {
-        // Treat as (length, width, quantity)
-        width = n2;
-        length = n1;
-        quantity = n3;
-        matched = true;
-        console.log(`Hybrid fallback (vertical): width=${width}, length=${length}, quantity=${quantity}`);
-        i += 2; // Skip next two lines
-      }
-    }
-
     if (matched && width > 0 && length > 0) {
       // If quantity is still not found, try to extract from remainder of line
       if (quantity === 0) {
@@ -102,10 +85,10 @@ function parseOCRText(text) {
       });
 
       console.log(`  Added: ${width}x${length}, quantity=${quantity}`);
-    } else if (!matched) {
+    } else {
       console.log('  No dimension pattern matched');
     }
-  }
+  });
 
   return result;
 }

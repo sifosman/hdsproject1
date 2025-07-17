@@ -156,6 +156,8 @@ const generateQuote = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const processedSections = [];
         const pdfSections = [];
         let grandTotal = 0;
+        let totalEdgingLength = 0;
+        let edgingCostTotal = 0;
         for (const section of sections) {
             const { material, cutPieces } = section;
             if (!material || !cutPieces || !Array.isArray(cutPieces) || cutPieces.length === 0) {
@@ -331,6 +333,13 @@ const generateQuote = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 }
             }
             console.log(`Edging calculation: Total edging required: ${totalEdging}mm`);
+            // Calculate edging cost (R14 per metre)
+            const edgingCost = (totalEdging / 1000) * 14;
+            // Add to total edging length accumulator
+            totalEdgingLength += totalEdging;
+            // Add edging cost to grand total
+            grandTotal += edgingCost;
+            edgingCostTotal += edgingCost;
             // 10. Format sizes for display (use adjusted dimensions)
             const boardSize = `${length}×${width}${sizeParts[2] ? '×' + sizeParts[2] : ''}`;
             // 11. Add to processed sections with wastage and edging info
@@ -348,8 +357,9 @@ const generateQuote = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     efficiencyPercentage
                 },
                 edging: {
-                    totalEdging,
-                    edgingBreakdown
+                    length: totalEdging,
+                    totalEdging: totalEdging, // Add this for PDF compatibility
+                    cost: edgingCost
                 }
             };
             processedSections.push(processedSection);
@@ -386,7 +396,9 @@ const generateQuote = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             sections: pdfSections,
             grandTotal,
             branchData: branchData || null,
-            bankingDetails: bankingDetails
+            bankingDetails: bankingDetails,
+            edgingLength: totalEdgingLength, // Total in mm
+            edgingCost: edgingCostTotal // Total cost
         });
         // 9. Upload PDF to Supabase "hdsquotes" bucket and get public URL
         console.log(`Uploading quote PDF to Supabase storage (quoteId: ${quoteId})...`);

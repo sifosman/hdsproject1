@@ -9,66 +9,8 @@ export function parseOcrText(ocrText: string, materialCategories: string[]): { d
   let currentMaterial = materialCategories[0];
   
   // Split OCR text into lines
-  let lines = ocrText.split('\n').map(line => line.trim()).filter(line => line !== '');
+  const lines = ocrText.split('\n').filter(line => line.trim() !== '');
   console.log(`Parsing ${lines.length} lines of OCR text`);
-
-  // Define phrases to ignore (HDS header, company info, form labels, etc.)
-  const ignorePhrases = [
-    'HDS',
-    'WE CUT AND EDGE BOARDS',
-    'Van Tonder Street',
-    'Centurion',
-    'Cell:',
-    'E-mail:',
-    'Board Name:',
-    'Dessert',
-    'Sky Matt',
-    'Edging Colour',
-    'Phone No',
-    'Final Size',
-    'Cut Size',
-    'Edging Thickness',
-    'Name:',
-    'Date:',
-    'Client Signed:',
-    'No.',
-    'Height/Length',
-    'Width',
-    'Qty',
-    'Edging Length',
-    'Edging Width',
-    'Pot Holes',
-    'Board name',
-    'Edging',
-    'Colour',
-    'Thickness',
-    'Size',
-    'Client',
-    'Signed',
-    'Date',
-    'Phone',
-    'Name',
-    'Dessert',
-    'Sky',
-    'Matt',
-    'WILLCARE', // Example name on form
-    'WILLCARE', // OCR may pick up this as a header
-    'Sunderland Ridge',
-    'Sunderland',
-    'Street',
-    'Board',
-    'Material',
-    'No',
-    'Pot',
-    'Holes'
-  ];
-
-  // Remove header/top lines that match ignore phrases
-  lines = lines.filter(line => {
-    // If line contains any ignore phrase, skip it
-    return !ignorePhrases.some(phrase => line.toLowerCase().includes(phrase.toLowerCase()));
-  });
-  console.log(`After header exclusion: ${lines.length} lines remain`);
   
   // Look for material headings and dimensions
   for (let i = 0; i < lines.length; i++) {
@@ -91,8 +33,8 @@ export function parseOcrText(ocrText: string, materialCategories: string[]): { d
       continue;
     }
     
-    // Try to extract dimensions: format like '460x2000', '2000 x 460 = 2', etc.
-    const dimensionMatch = line.match(/(\d+)\s*[xX×*]\s*(\d+)(?:\s*[=\-]\s*(\d+))?/);
+    // Try to extract dimensions: format like '460x2000'
+    const dimensionMatch = line.match(/(\d+)\s*[xX×*]\s*(\d+)(?:\s*[xX×*]\s*(\d+))?/);
     if (dimensionMatch) {
       const width = parseInt(dimensionMatch[1], 10);
       const length = parseInt(dimensionMatch[2], 10);
@@ -109,26 +51,7 @@ export function parseOcrText(ocrText: string, materialCategories: string[]): { d
         });
         
         console.log(`Added dimension: ${width}x${length}, qty=${quantity}, material=${currentMaterial}`);
-        continue; // Classic pattern matched, skip fallback
       }
-    }
-
-    // Fallback: check for three consecutive numeric lines (vertical/columnar OCR)
-    const n1 = parseInt(line, 10);
-    const n2 = i+1 < lines.length ? parseInt(lines[i+1], 10) : NaN;
-    const n3 = i+2 < lines.length ? parseInt(lines[i+2], 10) : NaN;
-    if (!isNaN(n1) && !isNaN(n2) && !isNaN(n3)) {
-      dimensions.push({
-        id: `dim-${Date.now()}-${dimensions.length}`,
-        width: n2,
-        length: n1,
-        quantity: n3,
-        material: currentMaterial,
-        description: `${n1} x ${n2} x ${n3}`
-      });
-      console.log(`Added vertical dimension: ${n1} x ${n2} x ${n3}, material=${currentMaterial}`);
-      i += 2; // Skip next two lines
-      continue;
     }
   }
   
@@ -279,12 +202,39 @@ export function normalizeCutPieces(rawPieces: any[], DEFAULT_MATERIAL_CATEGORIES
   return normalizedPieces;
 }
 
-export function calculateEdging(piece: CutPiece): number {
+export function calculateEdging(piece: CutPiece): string {
+  if (!piece) return '';
+  
+  const edgingSides: string[] = [];
+  
+  // Check each tick box and add the corresponding side
+  if (piece.lengthTick1) edgingSides.push('L1');
+  if (piece.lengthTick2) edgingSides.push('L2');
+  if (piece.widthTick1) edgingSides.push('W1');
+  if (piece.widthTick2) edgingSides.push('W2');
+  
+  // Return comma-separated string of sides that need edging
+  return edgingSides.join(',');
+}
+
+export function calculateEdgingLength(piece: CutPiece): number {
   if (!piece) return 0;
   
-  // Edging is calculated as the perimeter in mm
-  // We assume 1mm edging
-  return ((piece.width || 0) + (piece.length || 0)) * 2 * 1000;
+  let totalEdging = 0;
+  
+  // Calculate edging length based on tick boxes
+  // L1 and L2 = length of the piece
+  if (piece.lengthTick1) totalEdging += (piece.length || 0);
+  if (piece.lengthTick2) totalEdging += (piece.length || 0);
+  
+  // W1 and W2 = width of the piece  
+  if (piece.widthTick1) totalEdging += (piece.width || 0);
+  if (piece.widthTick2) totalEdging += (piece.width || 0);
+  
+  // Multiply by quantity
+  totalEdging *= (piece.quantity || 1);
+  
+  return totalEdging;
 }
 
 export function downloadPdf(url: string, filename: string) {

@@ -31,8 +31,7 @@ import {
   useTheme,
   Grid,
   Checkbox,
-  FormControlLabel,
-  useMediaQuery
+  FormControlLabel
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -60,12 +59,15 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   initialData, 
   onSave,
   onSendWhatsApp,
+  isMobile,
   isConfirmed,
   branchData,
   requireMaterialValidation = false
 }) => {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  
+  // State to track active validation
+  const [isValidating, setIsValidating] = useState<boolean>(false);
   
   // Default material options as fallback
   const DEFAULT_MATERIAL_CATEGORIES = [
@@ -253,7 +255,6 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     }
     // Otherwise, make sure at least one material section exists
     else if (cutPieces.length === 0 || !cutPieces.some(p => p.separator)) {
-      // Add default material section if all were deleted
       handleAddMaterialSection();
     }
   }, [detectedMaterials.length]);
@@ -273,19 +274,26 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     );
   };
 
-  const handleAddMaterialSection = (insertIndex: number = cutPieces.length) => {
+  const handleAddMaterialSection = () => {
+    // Generate unique IDs for both the separator and the new piece
     const separatorId = `separator-${Date.now()}`;
     const newPieceId = `piece-${Date.now()}`;
+    
+    // Default material to use
     const defaultMaterial = materialCategories.length > 0 ? materialCategories[0] : 'New Material';
     
-    setCutPieces(prev => {
-      const newSeparator = {
+    // Add both the separator and a blank piece at once
+    setCutPieces(prevCutPieces => [
+      ...prevCutPieces,
+      // Add the material section separator
+      {
         id: separatorId,
         separator: true,
         name: defaultMaterial,
         material: defaultMaterial,
-      };
-      const newPiece = {
+      },
+      // Add an empty piece with the same material
+      {
         id: newPieceId,
         name: '',
         width: undefined,
@@ -297,30 +305,22 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         lengthTick2: false,
         widthTick1: false,
         widthTick2: false,
-      };
-
-      const newPieces = [...prev];
-      newPieces.splice(insertIndex, 0, newSeparator, newPiece);
-      return newPieces;
-    });
+      }
+    ]);
     
-    setSectionMaterials(prevSectionMaterials => {
-      const shifted = {};
-      Object.entries(prevSectionMaterials).forEach(([key, value]) => {
-        const idx = Number(key);
-        if (idx >= insertIndex) {
-          shifted[idx + 2] = value;
-        } else {
-          shifted[idx] = value;
-        }
+    // Set a material section for the newly added material if we have material categories
+    if (materialCategories.length > 0) {
+      // Create a default section material structure for the dropdown
+      setSectionMaterials(prev => {
+        const newMaterialSection = {
+          material: defaultMaterial,
+          category: materialCategories[0] || '',
+        };
+        return {...prev, [cutPieces.length]: newMaterialSection};
       });
-      shifted[insertIndex] = {
-        material: defaultMaterial,
-        category: materialCategories[0] || '',
-      };
-      return shifted;
-    });
+    }
     
+    // Show confirmation message
     setSnackbarMessage('New material section added');
     setSnackbarSeverity('success');
     setSnackbarOpen(true);
@@ -331,6 +331,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     let targetMaterial = materialName;
 
     if (!targetMaterial) {
+      // Find the last material section to add the piece to
       const lastSeparator = [...cutPieces].reverse().find(p => p.separator);
       targetMaterial = lastSeparator?.name || materialCategories[0] || 'New Material';
     }
@@ -350,17 +351,20 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       separator: false,
     };
 
+    // Find the correct index to insert the new piece
     let insertAtIndex = cutPieces.length;
     if (targetMaterial) {
-      const lastPieceInMaterialSectionIndex = cutPieces.map(p => p.material).lastIndexOf(targetMaterial);
-      if (lastPieceInMaterialSectionIndex !== -1) {
-        insertAtIndex = lastPieceInMaterialSectionIndex + 1;
-      } else {
-        const separatorIndex = cutPieces.findIndex(p => p.separator && p.name === targetMaterial);
-        if (separatorIndex !== -1) {
-          insertAtIndex = separatorIndex + 1;
+        // Find the last piece of the same material
+        const lastPieceInMaterialSectionIndex = cutPieces.map(p => p.material).lastIndexOf(targetMaterial);
+        if (lastPieceInMaterialSectionIndex !== -1) {
+            insertAtIndex = lastPieceInMaterialSectionIndex + 1;
+        } else {
+            // If no pieces of this material, find the separator and insert after it
+            const separatorIndex = cutPieces.findIndex(p => p.separator && p.name === targetMaterial);
+            if (separatorIndex !== -1) {
+                insertAtIndex = separatorIndex + 1;
+            }
         }
-      }
     }
 
     const updatedCutPieces = [...cutPieces];
@@ -372,15 +376,19 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     setCutPieces(prevCutPieces => prevCutPieces.filter(piece => piece.id !== id));
   };
 
+  // Function to delete a material section and all its pieces
   const handleDeleteMaterialSection = (headingIdx: number) => {
     setCutPieces(prevCutPieces => {
+      // Create a copy of current pieces
       const updatedPieces = [...prevCutPieces];
       
+      // Find the separator piece at the given index
       if (!updatedPieces[headingIdx] || !updatedPieces[headingIdx].separator) {
         console.error('Cannot delete: invalid material section index or not a separator');
         return prevCutPieces;
       }
       
+      // Find the next separator piece (or end of array)
       let nextSeparatorIdx = updatedPieces.findIndex((piece, idx) => 
         idx > headingIdx && piece.separator
       );
@@ -389,9 +397,12 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         nextSeparatorIdx = updatedPieces.length;
       }
       
+      // Remove the separator and all pieces until the next separator
       updatedPieces.splice(headingIdx, nextSeparatorIdx - headingIdx);
       
+      // Ensure there's at least one material section left
       if (!updatedPieces.some(piece => piece.separator)) {
+        // Add default material section if all were deleted
         updatedPieces.unshift({
           id: `sep-default-${Date.now()}`,
           name: DEFAULT_MATERIAL_CATEGORIES[0],
@@ -404,12 +415,14 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   };
 
   const handleSave = () => {
+    // Validate all piece fields
     if (cutPieces.some(p => !p.separator && (!p.length || !p.width || !p.quantity))) {
       setSnackbarMessage('Please fill in all dimensions and quantity for each piece.');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
       return;
     }
+    // Material required validation
     if (requireMaterialValidation) {
       const sections = getSections();
       const missingMaterial = sections.some(section => !section.material || section.material.trim() === '');
@@ -433,6 +446,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     setSnackbarOpen(true);
   };
 
+
   const handleOpenWhatsAppDialog = () => setWhatsappDialogOpen(true);
   const handleCloseWhatsAppDialog = () => setWhatsappDialogOpen(false);
 
@@ -440,29 +454,31 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     if (!onSendWhatsApp) return;
 
     if (!phoneNumber || !customerName) {
-      setSnackbarMessage('Phone number and customer name are required.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-      return;
+        setSnackbarMessage('Phone number and customer name are required.');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+        return;
     }
 
     const dataToSend = { stockPieces, cutPieces, materials, unit, customerName, projectName };
     
     try {
-      await onSendWhatsApp(phoneNumber, dataToSend, customerName, projectName);
-      setSnackbarMessage('WhatsApp message sent successfully!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
-      handleCloseWhatsAppDialog();
+        await onSendWhatsApp(phoneNumber, dataToSend, customerName, projectName);
+        setSnackbarMessage('WhatsApp message sent successfully!');
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+        handleCloseWhatsAppDialog();
     } catch (error) {
-      console.error('Error sending WhatsApp message:', error);
-      setSnackbarMessage('Failed to send WhatsApp message.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
+        console.error('Error sending WhatsApp message:', error);
+        setSnackbarMessage('Failed to send WhatsApp message.');
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
     }
   };
 
   const handleCalculate = () => {
+    console.log('handleCalculate called');
+    // Validate data
     if (cutPieces.length === 0) {
       setSnackbarMessage('Please add cut pieces first');
       setSnackbarSeverity('error');
@@ -470,8 +486,10 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       return;
     }
 
+    // Group the cutlist pieces by material section
     const sections = getSections();
     console.log('Material sections:', sections);
+    console.log('Current validation state:', { isValidating, requireMaterialValidation });
     
     if (sections.length === 0) {
       setSnackbarMessage('No valid material sections found. Please add at least one material section with cut pieces.');
@@ -480,17 +498,98 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       return;
     }
     
+    // Enhanced validation for material dropdowns
+    // Check for missing material selections
+    const missingMaterialSections = sections.filter(section => !section.material || section.material.trim() === '');
+    if (missingMaterialSections.length > 0) {
+      // Find the first section with missing material
+      const firstMissingSectionIndex = sections.findIndex(section => !section.material || section.material.trim() === '');
+      
+      // Set validation state to true to show validation errors
+      console.log('Setting validation state to true for material validation');
+      setIsValidating(true);
+      
+      // Scroll to the first missing material dropdown
+      const materialDropdownId = `material-dropdown-${firstMissingSectionIndex}`;
+      console.log('Looking for material dropdown with ID:', materialDropdownId);
+      const materialDropdownElement = document.getElementById(materialDropdownId);
+      
+      // Set requireMaterialValidation to true as well to ensure both states trigger validation
+      setRequireMaterialValidation(true);
+      
+      if (materialDropdownElement) {
+        console.log('Found material dropdown element, scrolling to it');
+        // Scroll to the element with smooth behavior
+        materialDropdownElement.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center' 
+        });
+        
+        // Add a visual highlight to the dropdown
+        materialDropdownElement.style.boxShadow = '0 0 8px 2px rgba(244, 67, 54, 0.6)';
+        
+        // Add a slight delay then focus the dropdown
+        setTimeout(() => {
+          // For desktop view, find the select element
+          const selectElement = materialDropdownElement.querySelector('div[role="button"]') as HTMLElement;
+          if (selectElement) {
+            console.log('Focusing and animating select element');
+            selectElement.focus();
+            // Add a pulsing animation to draw attention
+            selectElement.animate(
+              [
+                { boxShadow: '0 0 0 0 rgba(244, 67, 54, 0.7)' },
+                { boxShadow: '0 0 0 10px rgba(244, 67, 54, 0)' },
+              ],
+              {
+                duration: 1500,
+                iterations: 3,
+              }
+            );
+          } else {
+            console.log('Could not find select element within dropdown');
+          }
+          
+          // Remove the highlight after animation completes
+          setTimeout(() => {
+            if (materialDropdownElement) {
+              materialDropdownElement.style.boxShadow = '';
+            }
+            // Keep validation state active for a while to ensure user sees the error
+            setTimeout(() => {
+              setIsValidating(false);
+            }, 10000); // Reset validation state after 10 seconds
+          }, 4500); // 1500ms * 3 iterations
+        }, 500);
+      } else {
+        console.log('Could not find material dropdown element with ID:', materialDropdownId);
+        // Even if we can't find the element, keep validation state active for a while
+        setTimeout(() => {
+          setIsValidating(false);
+        }, 10000); // Reset validation state after 10 seconds
+      }
+      
+      setSnackbarMessage('⚠️ Please select a material for all sections before confirming the cutlist');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    
+    // All validations passed, open the confirmation dialog
     setConfirmationDialogOpen(true);
   };
 
+  // Function to process the optimizer after user confirms measurements
   const processOptimizer = async () => {
     try {
       setSnackbarMessage('Calculating optimal cutting plan and generating quotation...');
       setSnackbarSeverity('info');
       setSnackbarOpen(true);
       
+      // Group the cutlist pieces by material section
       const sections = getSections();
       
+      // Prepare data for the backend
       const sectionData = sections.map(section => ({
         material: section.material,
         cutPieces: section.pieces.map(piece => ({
@@ -498,11 +597,12 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
           width: piece.width || 0,
           length: piece.length || 0,
           amount: piece.quantity || 1,
-          edging: calculateEdging(piece),
+          edging: calculateEdging(piece), // This now returns a string like "L1,W2"
           name: piece.name
         }))
       }));
       
+      // Prepare the request payload
       const quotePayload = {
         sections: sectionData,
         customerName: customerName || 'Customer',
@@ -513,12 +613,14 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       
       console.log('Sending quote request to backend:', quotePayload);
       
+      // Use the new backend endpoint for generating quotes
       const quoteResult = await generateQuote(quotePayload);
       
       console.log('Quote result from backend:', quoteResult);
       
       if (!quoteResult.success) {
         console.error('Quote generation failed:', quoteResult);
+        // Use the detailed error message if available, otherwise use the general message or a fallback
         const errorMessage = quoteResult.error || quoteResult.message || 'Unknown error';
         setSnackbarMessage(`Failed to generate quote: ${errorMessage}`);
         setSnackbarSeverity('error');
@@ -526,13 +628,17 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         return;
       }
       
+      // Extract data from the response
       const { quoteId, sections: processedSections, grandTotal, pdfUrl } = quoteResult.data;
       
+      // Trigger PDF download
       if (pdfUrl) {
         console.log('Downloading PDF from URL:', pdfUrl ? pdfUrl.substring(0, 100) + '...' : 'undefined');
         
+        // Handle both Supabase public URLs and base64 data URLs
         if (pdfUrl.startsWith('data:application/pdf;base64,') || pdfUrl.startsWith('http')) {
           console.log('Valid PDF URL detected:', pdfUrl.startsWith('data:') ? 'base64 format' : 'Supabase public URL');
+          // Store data and open success modal
           setSuccessQuoteData({
             quoteId,
             pdfUrl,
@@ -552,9 +658,11 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         setSnackbarOpen(true);
       }
       
+      // Generate quotation text for WhatsApp
       const now = new Date();
       const quoteDate = now.toLocaleDateString();
       
+      // Helper to format numbers safely without throwing
       const safeFixed = (val: number | undefined | null, digits = 2): string =>
         typeof val === 'number' && isFinite(val) ? val.toFixed(digits) : '-';
       
@@ -583,22 +691,13 @@ GRAND TOTAL: R ${safeFixed(grandTotal)}
 Thank you for your business!
 `;
       
+      // Set a success message
       setSnackbarMessage(`Quotation generated successfully. Total: R ${safeFixed(grandTotal)}`);
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       
-      const thankYouMessage = `Thank you for choosing HDS Group! Your quotation (ID: ${successQuoteData.quoteId}) is now ready.`;
+      // WhatsApp message will be sent from the success modal when user clicks the button
       
-      const encodedMessage = encodeURIComponent(thankYouMessage);
-      
-      const whatsappUrl = `whatsapp://send?text=${encodedMessage}`;
-      
-      window.open(whatsappUrl, '_blank');
-      
-      setSnackbarMessage('WhatsApp sharing initiated with PDF download link');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
-      handleCloseQuoteSuccessDialog();
     } catch (error) {
       console.error('Calculation error:', error);
       setSnackbarMessage('Failed to calculate boards and price.');
@@ -607,10 +706,12 @@ Thank you for your business!
     }
   };
 
+  // Handle closing the quote success dialog
   const handleCloseQuoteSuccessDialog = () => {
     setQuoteSuccessDialogOpen(false);
   };
   
+  // Handle closing the snackbar
   const handleCloseSnackbar = (event?: React.SyntheticEvent | Event, reason?: string) => {
     if (reason === 'clickaway') {
       return;
@@ -628,16 +729,19 @@ Thank you for your business!
   };
 
   const navigate = useNavigate();
+  // Handle creating a new quote from the success modal
   const handleNewQuote = () => {
     navigate('/cutlist-edit/new');
   };
 
+  // Handle PDF download from the success modal
   const handleDownloadQuotePdf = () => {
     if (successQuoteData?.pdfUrl) {
       downloadPdf(successQuoteData.pdfUrl, `Quote-${successQuoteData.quoteId}.pdf`);
     }
   };
   
+  // Handle sharing to WhatsApp from the success modal
   const handleShareToWhatsApp = async () => {
     if (!successQuoteData?.quoteId || !successQuoteData?.pdfUrl) {
       setSnackbarMessage('Missing quote data for WhatsApp sharing');
@@ -647,37 +751,67 @@ Thank you for your business!
     }
     
     try {
+      // Set loading state
       setIsLoading(true);
       
+      // Extract PDF data URL and convert to proper URL if needed
       let pdfUrl = successQuoteData.pdfUrl;
       let finalPdfUrl = pdfUrl;
       
-      if (pdfUrl.startsWith('data:application/pdf')) {
-        const response = await fetch('/api/quotes/upload-pdf', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            quoteId: successQuoteData.quoteId,
-            pdfDataUrl: pdfUrl
-          }),
-        });
+      // If this is a data URL, we need to upload it to the server to get a shareable link
+      const isPdfDataUrl = pdfUrl.startsWith('data:application/pdf');
+      
+      if (isPdfDataUrl) {
+        // Show loading message
+        setSnackbarMessage('Preparing PDF for sharing...');
+        setSnackbarSeverity('info');
+        setSnackbarOpen(true);
         
-        if (!response.ok) {
-          throw new Error('Failed to upload PDF');
+        try {
+          // Upload PDF data URL to get a shareable link
+          const response = await fetch('/api/quotes/upload-pdf', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              quoteId: successQuoteData.quoteId,
+              pdfDataUrl: pdfUrl
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error('Failed to upload PDF');
+          }
+          
+          const result = await response.json();
+          finalPdfUrl = result.pdfUrl; // Use the URL returned by the server
+          
+        } catch (uploadError) {
+          console.error('PDF upload error:', uploadError);
+          // If upload fails, we'll use a fallback message
+          setSnackbarMessage('Failed to prepare PDF for sharing, using fallback method');
+          setSnackbarSeverity('warning');
+          setSnackbarOpen(true);
         }
-        
-        const result = await response.json();
-        finalPdfUrl = result.pdfUrl; 
       }
       
-      const thankYouMessage = `Thank you for choosing HDS Group! Your quotation (ID: ${successQuoteData.quoteId}) is now ready.`;
+      // Create a thank you message from HDS stating that the quotation is ready
+      let thankYouMessage = `Thank you for choosing HDS Group! Your quotation (ID: ${successQuoteData.quoteId}) is now ready.`;
       
+      // Always include the PDF link - either the uploaded URL or the original URL
+      thankYouMessage += ` You can view and download your quotation at: ${finalPdfUrl}\n\nWe appreciate your business and look forward to working with you.`;
+      
+      // Encode the message for the WhatsApp URL
       const encodedMessage = encodeURIComponent(thankYouMessage);
       
+      // Create the WhatsApp URL with the encoded message
       const whatsappUrl = `whatsapp://send?text=${encodedMessage}`;
       
+      // Clear loading state
+      setIsLoading(false);
+      
+      // Open the URL in a new window/tab
       window.open(whatsappUrl, '_blank');
       
       setSnackbarMessage('WhatsApp sharing initiated with PDF download link');
@@ -693,6 +827,7 @@ Thank you for your business!
     }
   };
 
+  // This function finds all sections based on separator pieces
   const getSections = () => {
     const sections: { material: string, pieces: CutPiece[], headingIdx: number }[] = [];
     if (!cutPieces) {
@@ -708,6 +843,15 @@ Thank you for your business!
     let currentHeadingIdx: number = -1;
 
     cutPieces.forEach((piece, idx) => {
+      // Debug the current piece
+      console.log(`EditableCutlistTable: Processing piece ${idx}:`, { 
+        id: piece.id, 
+        name: piece.name, 
+        separator: piece.separator,
+        material: piece.material,
+        dimensions: `${piece.length}x${piece.width}`
+      });
+      
       if (piece.separator) {
         console.log(`EditableCutlistTable: Found separator at index ${idx} for material: ${piece.name}`);
         if (currentMaterial !== undefined && currentHeadingIdx !== -1) {
@@ -738,7 +882,9 @@ Thank you for your business!
   return (
     <Paper elevation={3}>
       {isMobile ? (
+        // Mobile Card View
         <Box sx={{ p: 2 }}>
+          {/* Mobile view heading with add material section button */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6">Cutlist</Typography>
             <Button 
@@ -746,7 +892,7 @@ Thank you for your business!
               color="secondary"
               size="small"
               startIcon={<AddIcon />}
-              onClick={() => handleAddMaterialSection()}
+              onClick={handleAddMaterialSection}
               disabled={isConfirmed}
               sx={{ fontWeight: 'bold' }}
             >
@@ -754,10 +900,64 @@ Thank you for your business!
             </Button>
           </Box>
           
+          {console.log('Rendering mobile sections, validation state:', { isValidating, requireMaterialValidation })}
           {sections.map((section, sectionIdx) => (
             <Box key={`section-mobile-${sectionIdx}`} sx={{ mb: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <FormControl fullWidth size="small" required={requireMaterialValidation} error={requireMaterialValidation && (!section.material || section.material.trim() === '')}>
+                {console.log(`Rendering section ${sectionIdx}, material: ${section.material}, validation: ${(requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '')}`)}
+                
+                  <FormControl 
+                    fullWidth 
+                    size="medium" 
+                    required={requireMaterialValidation || isValidating} 
+                    error={(requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '')}
+                    id={`material-dropdown-${sectionIdx}`}
+                    sx={{
+                      animation: isValidating && (!section.material || section.material.trim() === '') ? 
+                        'pulse 1.5s infinite' : 'none',
+                      '@keyframes pulse': {
+                        '0%': {
+                          boxShadow: '0 0 0 0 rgba(211, 47, 47, 0.7)',
+                        },
+                        '70%': {
+                          boxShadow: '0 0 0 10px rgba(211, 47, 47, 0)',
+                        },
+                        '100%': {
+                          boxShadow: '0 0 0 0 rgba(211, 47, 47, 0)',
+                        },
+                      },
+                      mb: (requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') ? 0 : 2,
+                      '& .MuiOutlinedInput-root': {
+                        fontSize: '1.1rem',
+                        fontWeight: 'bold',
+                        border: '3px solid #1976d2',
+                        borderRadius: '8px',
+                        backgroundColor: '#f8f9ff',
+                        '&:hover': {
+                          border: '3px solid #1565c0',
+                        },
+                        '&.Mui-focused': {
+                          border: '3px solid #0d47a1',
+                          boxShadow: '0 0 0 2px rgba(25, 118, 210, 0.2)',
+                        },
+                        '&.Mui-error': {
+                          border: '3px solid #d32f2f',
+                          backgroundColor: '#fff5f5',
+                        }
+                      },
+                      '& .MuiInputLabel-root': {
+                        fontSize: '1.1rem',
+                        fontWeight: 'bold',
+                        color: '#1976d2',
+                        '&.Mui-focused': {
+                          color: '#0d47a1',
+                        },
+                        '&.Mui-error': {
+                          color: '#d32f2f',
+                        }
+                      }
+                    }}
+                  >
                     <InputLabel>Material</InputLabel>
                     <Select
                         value={section.material}
@@ -765,6 +965,7 @@ Thank you for your business!
                             const newMaterial = e.target.value;
                             const updatedPieces = [...cutPieces];
                             updatedPieces[section.headingIdx].name = newMaterial;
+                            // Update material for all pieces in this section
                             for (let i = section.headingIdx + 1; i < updatedPieces.length; i++) {
                                 if (updatedPieces[i].separator) break;
                                 updatedPieces[i].material = newMaterial;
@@ -777,19 +978,40 @@ Thank you for your business!
                             <MenuItem key={description} value={description}>{description}</MenuItem>
                         ))}
                     </Select>
-                    {requireMaterialValidation && (!section.material || section.material.trim() === '') && (
-                      <Typography variant="caption" color="error">Material is required</Typography>
+                    {(requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') && (
+                      <Box sx={{ 
+                        mt: 1, 
+                        mb: 2,
+                        p: 1.5, 
+                        backgroundColor: '#ffebee', 
+                        border: '2px solid #f44336', 
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        animation: isValidating ? 'pulse 2s infinite' : 'none',
+                        '@keyframes pulse': {
+                          '0%': { opacity: 1, boxShadow: '0 0 0 0 rgba(244, 67, 54, 0.4)' },
+                          '50%': { opacity: 0.8, boxShadow: '0 0 0 10px rgba(244, 67, 54, 0)' },
+                          '100%': { opacity: 1, boxShadow: '0 0 0 0 rgba(244, 67, 54, 0)' },
+                        },
+                      }}>
+                        <Typography variant="body2" color="error" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                          ⚠️ Please select a material before continuing
+                        </Typography>
+                      </Box>
                     )}
                   </FormControl>
                   <IconButton
                     aria-label="Delete material section"
-                    onClick={(e: React.MouseEvent) => {
+                    onClick={() => {
                       if (isConfirmed || loadingMaterials) return;
+                      // Delete the entire material section instead of just clearing the name
                       handleDeleteMaterialSection(section.headingIdx);
                     }}
                     color="error"
                     sx={{ ml: 1 }}
-                    disabled={isConfirmed || loadingMaterials || sections.length <= 1}
+                    disabled={isConfirmed || loadingMaterials || sections.length <= 1} // Prevent deleting the last section
                   >
                     <DeleteIcon />
                   </IconButton>
@@ -803,14 +1025,14 @@ Thank you for your business!
                     <TextField label={`Width (${unit})`} type="number" value={piece.width ?? ''} onChange={(e) => handleCutPieceChange(piece.id, 'width', e.target.value)} variant="outlined" size="small" disabled={isConfirmed} />
                   </Box>
                   <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', mb: 1 }}>
-                    <FormControlLabel control={<Checkbox checked={!!piece.lengthTick1} onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)} disabled={isConfirmed} />} label="L1" />
-                    <FormControlLabel control={<Checkbox checked={!!piece.lengthTick2} onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)} disabled={isConfirmed} />} label="L2" />
-                    <FormControlLabel control={<Checkbox checked={!!piece.widthTick1} onChange={(e) => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)} disabled={isConfirmed} />} label="W1" />
-                    <FormControlLabel control={<Checkbox checked={!!piece.widthTick2} onChange={(e) => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)} disabled={isConfirmed} />} label="W2" />
+                    <FormControlLabel control={<Checkbox checked={!!piece.lengthTick1} onChange={e => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)} disabled={isConfirmed} />} label="L1" />
+                    <FormControlLabel control={<Checkbox checked={!!piece.lengthTick2} onChange={e => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)} disabled={isConfirmed} />} label="L2" />
+                    <FormControlLabel control={<Checkbox checked={!!piece.widthTick1} onChange={e => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)} disabled={isConfirmed} />} label="W1" />
+                    <FormControlLabel control={<Checkbox checked={!!piece.widthTick2} onChange={e => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)} disabled={isConfirmed} />} label="W2" />
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2}}>
                     <TextField label="Quantity" type="number" value={piece.quantity !== undefined && piece.quantity !== null ? piece.quantity : 1} onChange={(e) => handleCutPieceChange(piece.id, 'quantity', e.target.value)} variant="outlined" size="small" inputProps={{ min: 1 }} disabled={isConfirmed} />
-                    <IconButton onClick={(e: React.MouseEvent) => handleDeleteCutPiece(piece.id)} color="error" disabled={isConfirmed}><DeleteIcon /></IconButton>
+                    <IconButton onClick={() => handleDeleteCutPiece(piece.id)} color="error" disabled={isConfirmed}><DeleteIcon /></IconButton>
                   </Box>
                 </Paper>
               ))}
@@ -819,6 +1041,7 @@ Thank you for your business!
           <Fab color="primary" aria-label="add cut piece" sx={{ position: 'fixed', bottom: 16, right: 16 }} onClick={() => handleAddCutPiece()} disabled={isConfirmed}><AddIcon /></Fab>
         </Box>
       ) : (
+        // Desktop Table View
         <Box sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6">Cutlist</Typography>
@@ -828,7 +1051,7 @@ Thank you for your business!
                 variant="contained" 
                 color="secondary" 
                 startIcon={<AddIcon />} 
-                onClick={() => handleAddMaterialSection()} 
+                onClick={handleAddMaterialSection} 
                 disabled={isConfirmed}
                 sx={{ fontWeight: 'bold' }}
               >
@@ -837,9 +1060,11 @@ Thank you for your business!
             </Box>
           </Box>
           {(() => {
+            // Get all material sections
             const sections = getSections();
             
             if (sections.length === 0 && cutPieces.length === 0) {
+              // No materials or pieces yet, show a welcome message
               return (
                 <Box sx={{ textAlign: 'center', py: 4 }}>
                   <Typography variant="h6" sx={{ mb: 2 }}>No materials added yet</Typography>
@@ -847,7 +1072,7 @@ Thank you for your business!
                     variant="contained" 
                     color="primary"
                     startIcon={<AddIcon />}
-                    onClick={() => handleAddMaterialSection()}
+                    onClick={handleAddMaterialSection}
                   >
                     Add Your First Material Section
                   </Button>
@@ -855,9 +1080,11 @@ Thank you for your business!
               );
             }
             
+            // Return a separate table for each material section
             return sections.map((section, sectionIndex) => (
               <Box key={section.headingIdx} sx={{ mb: 4 }}>
                 <Paper elevation={2} sx={{ p: 0, borderRadius: '4px', overflow: 'hidden' }}>
+                  {/* Section header */}
                   <Box 
                     sx={{ 
                       bgcolor: 'primary.main', 
@@ -870,13 +1097,94 @@ Thank you for your business!
                     }}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                        Material Section {sectionIndex + 1}: {section.material}
+                      {/* Material dropdown for desktop view */}
+                      <FormControl 
+                        required={requireMaterialValidation} 
+                        error={requireMaterialValidation && (!section.material || section.material.trim() === '')}
+                        id={`material-dropdown-${sectionIndex}`}
+                        sx={{
+                          minWidth: 200,
+                          mr: 2,
+                          '& .MuiOutlinedInput-root': {
+                            color: 'white',
+                            '& fieldset': {
+                              borderColor: 'rgba(255, 255, 255, 0.5)',
+                            },
+                            '&:hover fieldset': {
+                              borderColor: 'white',
+                            },
+                            '&.Mui-focused fieldset': {
+                              borderColor: 'white',
+                            },
+                            '&.Mui-error fieldset': {
+                              borderColor: '#ff6b6b',
+                            }
+                          },
+                          '& .MuiInputLabel-root': {
+                            color: 'rgba(255, 255, 255, 0.7)',
+                            '&.Mui-focused': {
+                              color: 'white',
+                            },
+                            '&.Mui-error': {
+                              color: '#ff6b6b',
+                            }
+                          },
+                          '& .MuiSelect-icon': {
+                            color: 'white',
+                          }
+                        }}
+                      >
+                        <InputLabel>Material</InputLabel>
+                        <Select
+                          value={section.material || ''}
+                          onChange={(e) => {
+                            const newMaterial = e.target.value;
+                            const updatedPieces = [...cutPieces];
+                            updatedPieces[section.headingIdx].name = newMaterial;
+                            // Update material for all pieces in this section
+                            for (let i = section.headingIdx + 1; i < updatedPieces.length; i++) {
+                              if (updatedPieces[i].separator) break;
+                              updatedPieces[i].material = newMaterial;
+                            }
+                            setCutPieces(updatedPieces);
+                          }}
+                          disabled={isConfirmed || loadingMaterials}
+                          label="Material"
+                        >
+                          {loadingMaterials ? <MenuItem disabled>Loading...</MenuItem> : productDescriptions.map(description => (
+                            <MenuItem key={description} value={description}>{description}</MenuItem>
+                          ))}
+                        </Select>
+                        {requireMaterialValidation && (!section.material || section.material.trim() === '') && (
+                          <Box sx={{ 
+                            position: 'absolute',
+                            top: '100%',
+                            left: 0,
+                            right: 0,
+                            mt: 1, 
+                            p: 1, 
+                            backgroundColor: '#ffebee', 
+                            border: '2px solid #f44336', 
+                            borderRadius: '4px',
+                            zIndex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1
+                          }}>
+                            <Typography variant="body2" color="error" sx={{ fontWeight: 'bold', fontSize: '0.75rem' }}>
+                              ⚠️ Material selection required
+                            </Typography>
+                          </Box>
+                        )}
+                      </FormControl>
+                      
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
+                        Section {sectionIndex + 1}
                       </Typography>
                       {!isConfirmed && sections.length > 1 && (
                         <IconButton 
                           size="small" 
-                          onClick={(e: React.MouseEvent) => handleDeleteMaterialSection(section.headingIdx)}
+                          onClick={() => handleDeleteMaterialSection(section.headingIdx)}
                           sx={{ ml: 1, color: 'white' }}
                           disabled={isConfirmed}
                         >
@@ -884,8 +1192,20 @@ Thank you for your business!
                         </IconButton>
                       )}
                     </Box>
+                    {!isConfirmed && (
+                      <Button 
+                        variant="contained" 
+                        color="secondary" 
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={() => handleAddCutPiece(section.material)}
+                      >
+                        Add Piece
+                      </Button>
+                    )}
                   </Box>
                   
+                  {/* Section table */}
                   <TableContainer>
                     <Table>
                       <TableHead>
@@ -903,163 +1223,101 @@ Thank you for your business!
                               <TableCell width="5%" align="center">W2</TableCell>
                             </>
                           )}
-                          <TableCell width="10%" align="center">Material</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {section.pieces.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={isConfirmed ? 6 : 10} align="center">
+                            <TableCell colSpan={isConfirmed ? 5 : 9} align="center">
                               <Typography sx={{ py: 2, color: 'text.secondary' }}>No pieces added to this material section</Typography>
                             </TableCell>
                           </TableRow>
                         ) : (
-                          section.pieces.map((piece, index) => (
-                            <React.Fragment key={piece.id}>
-                              {piece.separator ? (
-                                <TableRow sx={{ backgroundColor: theme.palette.grey[200] }}>
-                                  <TableCell colSpan={10} sx={{ fontWeight: 'bold', py: 1 }}>
-                                    <Box display="flex" alignItems="center" justifyContent="space-between">
-                                      <Typography variant="subtitle1">{piece.name}</Typography>
-                                      {!isConfirmed && (
-                                        <IconButton onClick={(e: React.MouseEvent) => handleDeleteMaterialSection(index)} size="small">
-                                          <DeleteIcon />
-                                        </IconButton>
-                                      )}
-                                    </Box>
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                <TableRow>
-                                  {!isConfirmed && (
-                                    <TableCell>
-                                      <IconButton 
-                                        size="small" 
-                                        onClick={(e: React.MouseEvent) => handleDeleteCutPiece(piece.id)}
-                                        disabled={isConfirmed}
-                                      >
-                                        <DeleteIcon fontSize="small" />
-                                      </IconButton>
-                                    </TableCell>
-                                  )}
-                                  <TableCell>
-                                    <TextField
-                                      variant="standard"
-                                      value={piece.name || ''}
-                                      onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
-                                      fullWidth
-                                      disabled={isConfirmed}
-                                    />
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <TextField
-                                      variant="standard"
-                                      value={piece.width || ''}
-                                      onChange={(e) => handleCutPieceChange(piece.id, 'width', Number(e.target.value))}
-                                      type="number"
-                                      InputProps={{ inputProps: { min: 0, step: 1 } }}
-                                      disabled={isConfirmed}
-                                    />
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <TextField
-                                      variant="standard"
-                                      value={piece.length || ''}
-                                      onChange={(e) => handleCutPieceChange(piece.id, 'length', Number(e.target.value))}
-                                      type="number"
-                                      InputProps={{ inputProps: { min: 0, step: 1 } }}
-                                      disabled={isConfirmed}
-                                    />
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <TextField
-                                      variant="standard"
-                                      value={piece.quantity !== undefined && piece.quantity !== null ? piece.quantity : 1}
-                                      onChange={(e) => handleCutPieceChange(piece.id, 'quantity', Number(e.target.value))}
-                                      type="number"
-                                      InputProps={{ inputProps: { min: 1, step: 1 } }}
-                                      disabled={isConfirmed}
-                                    />
-                                  </TableCell>
-                                  {!isConfirmed && (
-                                    <>
-                                      <TableCell align="center">
-                                        <Checkbox 
-                                          checked={!!piece.lengthTick1} 
-                                          onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)}
-                                          disabled={isConfirmed}
-                                        />
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        <Checkbox 
-                                          checked={!!piece.lengthTick2} 
-                                          onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)}
-                                          disabled={isConfirmed}
-                                        />
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        <Checkbox 
-                                          checked={!!piece.widthTick1} 
-                                          onChange={(e) => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)}
-                                          disabled={isConfirmed}
-                                        />
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        <Checkbox 
-                                          checked={!!piece.widthTick2} 
-                                          onChange={(e) => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)}
-                                          disabled={isConfirmed}
-                                        />
-                                      </TableCell>
-                                    </>
-                                  )}
+                          section.pieces.map((piece) => (
+                            <TableRow key={piece.id}>
+                              {!isConfirmed && (
+                                <TableCell>
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={() => handleDeleteCutPiece(piece.id)}
+                                    disabled={isConfirmed}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </TableCell>
+                              )}
+                              <TableCell>
+                                <TextField
+                                  variant="standard"
+                                  value={piece.name || ''}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'name', e.target.value)}
+                                  fullWidth
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  variant="standard"
+                                  value={piece.width || ''}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'width', Number(e.target.value))}
+                                  type="number"
+                                  InputProps={{ inputProps: { min: 0, step: 1 } }}
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  variant="standard"
+                                  value={piece.length || ''}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'length', Number(e.target.value))}
+                                  type="number"
+                                  InputProps={{ inputProps: { min: 0, step: 1 } }}
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  variant="standard"
+                                  value={piece.quantity !== undefined && piece.quantity !== null ? piece.quantity : 1}
+                                  onChange={(e) => handleCutPieceChange(piece.id, 'quantity', Number(e.target.value))}
+                                  type="number"
+                                  InputProps={{ inputProps: { min: 1, step: 1 } }}
+                                  disabled={isConfirmed}
+                                />
+                              </TableCell>
+                              {!isConfirmed && (
+                                <>
                                   <TableCell align="center">
-                                    <FormControl>
-                                      <InputLabel id="material-label">Material</InputLabel>
-                                      <Select
-                                        labelId="material-label"
-                                        value={piece.material}
-                                        label="Material"
-                                        onChange={(e) => handleCutPieceChange(piece.id, 'material', e.target.value)}
-                                        disabled={isConfirmed}
-                                      >
-                                        {productDescriptions.map(description => (
-                                          <MenuItem key={description} value={description}>{description}</MenuItem>
-                                        ))}
-                                      </Select>
-                                    </FormControl>
+                                    <Checkbox 
+                                      checked={!!piece.lengthTick1} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick1', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
                                   </TableCell>
-                                </TableRow>
-                              )}
-                              {!isConfirmed && !piece.separator && index < section.pieces.length - 1 && !section.pieces[index + 1].separator && (
-                                <TableRow>
-                                  <TableCell colSpan={10} align="center" style={{ padding: '4px' }}>
-                                    <Box sx={{ position: 'relative', height: isMobile ? '30px' : '4px', display: 'flex', justifyContent: 'center' }}>
-                                      <IconButton
-                                        size="small"
-                                        sx={{
-                                          position: isMobile ? 'static' : 'absolute',
-                                          top: isMobile ? 0 : '-14px',
-                                          transform: isMobile ? 'none' : 'translateX(-50%)',
-                                          zIndex: 1,
-                                          backgroundColor: 'white',
-                                          border: '1px solid #ddd',
-                                          '&:hover': { backgroundColor: '#f5f5f5' },
-                                          ...(isMobile && { width: 36, height: 36, marginTop: 1 })
-                                        }}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleAddMaterialSection(index + 1);
-                                        }}
-                                        disabled={isConfirmed}
-                                      >
-                                        <AddIcon fontSize={isMobile ? "medium" : "small"} />
-                                      </IconButton>
-                                    </Box>
+                                  <TableCell align="center">
+                                    <Checkbox 
+                                      checked={!!piece.lengthTick2} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'lengthTick2', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
                                   </TableCell>
-                                </TableRow>
+                                  <TableCell align="center">
+                                    <Checkbox 
+                                      checked={!!piece.widthTick1} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'widthTick1', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    <Checkbox 
+                                      checked={!!piece.widthTick2} 
+                                      onChange={(e) => handleCutPieceChange(piece.id, 'widthTick2', e.target.checked)}
+                                      disabled={isConfirmed}
+                                    />
+                                  </TableCell>
+                                </>
                               )}
-                            </React.Fragment>
+                            </TableRow>
                           ))
                         )}
                       </TableBody>
@@ -1085,7 +1343,7 @@ Thank you for your business!
             variant="contained"
             color="secondary"
             startIcon={<AddIcon />}
-            onClick={() => handleAddMaterialSection()}
+            onClick={handleAddMaterialSection}
           >
             Add New Material Section
           </Button>
@@ -1119,6 +1377,7 @@ Thank you for your business!
         </Alert>
       </Snackbar>
 
+      {/* Confirmation Dialog */}
       <Dialog
         open={confirmationDialogOpen}
         onClose={handleCloseConfirmationDialog}
@@ -1145,6 +1404,7 @@ Thank you for your business!
         </DialogActions>
       </Dialog>
 
+      {/* Quote Success Dialog */}
       <Dialog
         open={quoteSuccessDialogOpen}
         onClose={handleCloseQuoteSuccessDialog}
@@ -1187,6 +1447,7 @@ Thank you for your business!
               </Button>
             </Box>
           </Box>
+          {/* Phone number alert message removed as requested */}
         </DialogContent>
         <DialogActions>
           <Button onClick={handleNewQuote} variant="contained" color="secondary" sx={{ mr: 1 }}>
