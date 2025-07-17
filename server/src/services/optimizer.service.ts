@@ -1174,8 +1174,13 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   
   totalEdgingCost = parseFloat((totalEdgingMeters * EDGING_PRICE_PER_METER).toFixed(2));
   
-  // Calculate final grand total with edging included
-  const finalTotal = boardTotal + totalEdgingCost;
+  // Calculate cutting fee (R70 per board)
+  const cuttingFeePerBoard = 70; // R70 per board
+  const totalBoardsUsed = sections.reduce((sum: number, section: any) => sum + (section.boardsNeeded || 0), 0);
+  const totalCuttingFee = parseFloat((totalBoardsUsed * cuttingFeePerBoard).toFixed(2));
+  
+  // Calculate final grand total with edging and cutting fee included
+  const finalTotal = boardTotal + totalEdgingCost + totalCuttingFee;
   
   // Right column: Project information only (grand total will be moved to the bottom)
   const infoWidth = 200;
@@ -1325,7 +1330,16 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: Buffer, id: 
   doc.text(`R ${totalEdgingCost.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
   
   summaryY += summaryRowHeight;
-  
+
+  // Cutting fee row with light green background
+  doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight)
+     .fillAndStroke('#e6ffe6', '#000000'); // Light green background
+  doc.fillColor('#000000');
+  doc.text(`Cutting Fee (R${cuttingFeePerBoard} per board × ${totalBoardsUsed} board(s))`, 60, summaryY + 8);
+  doc.text(`R ${totalCuttingFee.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
+
+  summaryY += summaryRowHeight;
+
   // Grand total row - highlighted
   doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 10)
      .fillAndStroke('#003366', '#000000');
