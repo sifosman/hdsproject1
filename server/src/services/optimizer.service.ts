@@ -1,6 +1,7 @@
 import { IPiece } from '../models/project.model';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
+import { Buffer } from 'buffer';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -1562,8 +1563,9 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: any, id: str
     // Wait for the PDF to be fully generated
     doc.on('end', () => {
       // Return the buffer and ID
+      const pdfBuffer = Buffer.concat(buffers);
       resolve({
-        buffer: (buffers as any[]).length === 1 ? buffers[0] : buffers,
+        buffer: pdfBuffer,
         id: pdfId
       });
     });
