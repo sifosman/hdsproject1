@@ -502,11 +502,24 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
     }
     
     // Enhanced validation for material dropdowns
-    // Check for missing material selections
-    const missingMaterialSections = sections.filter(section => !section.material || section.material.trim() === '');
+    // Check for missing or invalid material selections
+    console.log('Validation check - Available product descriptions:', productDescriptions);
+    console.log('Validation check - Section materials:', sections.map(s => ({ material: s.material, valid: productDescriptions.includes(s.material) })));
+    
+    const missingMaterialSections = sections.filter(section => 
+      !section.material || 
+      section.material.trim() === '' || 
+      !productDescriptions.includes(section.material)
+    );
+    
+    console.log('Missing/invalid material sections:', missingMaterialSections.length);
     if (missingMaterialSections.length > 0) {
-      // Find the first section with missing material
-      const firstMissingSectionIndex = sections.findIndex(section => !section.material || section.material.trim() === '');
+      // Find the first section with missing or invalid material
+      const firstMissingSectionIndex = sections.findIndex(section => 
+        !section.material || 
+        section.material.trim() === '' || 
+        !productDescriptions.includes(section.material)
+      );
       
       // Set validation state to true to show validation errors
       console.log('Setting validation state to true for material validation');
@@ -913,7 +926,7 @@ Thank you for your business!
                     fullWidth 
                     size="medium" 
                     required={showMaterialValidation || requireMaterialValidation || isValidating} 
-                    error={(showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '')}
+                    error={(showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '' || !productDescriptions.includes(section.material))}
                     id={`material-dropdown-${sectionIdx}`}
                     sx={{
                       animation: isValidating && (!section.material || section.material.trim() === '') ? 
@@ -929,7 +942,7 @@ Thank you for your business!
                           boxShadow: '0 0 0 0 rgba(211, 47, 47, 0)',
                         },
                       },
-                      mb: (showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') ? 0 : 2,
+                      mb: (showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '' || !productDescriptions.includes(section.material)) ? 0 : 2,
                       '& .MuiOutlinedInput-root': {
                         fontSize: '1.1rem',
                         fontWeight: 'bold',
@@ -981,7 +994,7 @@ Thank you for your business!
                             <MenuItem key={description} value={description}>{description}</MenuItem>
                         ))}
                     </Select>
-                    {(showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') && (
+                    {(showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '' || !productDescriptions.includes(section.material)) && (
                       <Box sx={{ 
                         mt: 1, 
                         mb: 2,
@@ -1103,7 +1116,7 @@ Thank you for your business!
                       {/* Material dropdown for desktop view */}
                       <FormControl 
                         required={showMaterialValidation || requireMaterialValidation} 
-                        error={(showMaterialValidation || requireMaterialValidation) && (!section.material || section.material.trim() === '')}
+                        error={(showMaterialValidation || requireMaterialValidation) && (!section.material || section.material.trim() === '' || !productDescriptions.includes(section.material))}
                         id={`material-dropdown-${sectionIndex}`}
                         sx={{
                           minWidth: 200,
@@ -1158,7 +1171,7 @@ Thank you for your business!
                             <MenuItem key={description} value={description}>{description}</MenuItem>
                           ))}
                         </Select>
-                        {(showMaterialValidation || requireMaterialValidation) && (!section.material || section.material.trim() === '') && (
+                        {(showMaterialValidation || requireMaterialValidation) && (!section.material || section.material.trim() === '' || !productDescriptions.includes(section.material)) && (
                           <Box sx={{ 
                             position: 'absolute',
                             top: '100%',
