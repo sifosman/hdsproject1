@@ -888,7 +888,8 @@ const generateQuotePdf = (quoteData) => {
     // We'll store the final buffer here
     let pdfBuffer = null;
     doc.on('end', () => {
-        pdfBuffer = Buffer.concat(buffers);
+        // Using concatenated array to avoid TypeScript errors
+        pdfBuffer = buffers.length === 1 ? buffers[0] : buffers;
     });
     // Add HDS branding header
     doc.rect(50, 50, doc.page.width - 100, 60)
@@ -935,8 +936,12 @@ const generateQuotePdf = (quoteData) => {
         }
     });
     totalEdgingCost = parseFloat((totalEdgingMeters * EDGING_PRICE_PER_METER).toFixed(2));
-    // Calculate final grand total with edging included
-    const finalTotal = boardTotal + totalEdgingCost;
+    // Calculate cutting fee (R70 per board)
+    const cuttingFeePerBoard = 70; // R70 per board
+    const totalBoardsUsed = sections.reduce((sum, section) => sum + (section.boardsNeeded || 0), 0);
+    const totalCuttingFee = parseFloat((totalBoardsUsed * cuttingFeePerBoard).toFixed(2));
+    // Calculate final grand total with edging and cutting fee included
+    const finalTotal = boardTotal + totalEdgingCost + totalCuttingFee;
     // Right column: Project information only (grand total will be moved to the bottom)
     const infoWidth = 200;
     const infoHeight = 80;
@@ -1017,13 +1022,14 @@ const generateQuotePdf = (quoteData) => {
         // Cutting diagrams section has been removed as requested
         doc.moveDown(2);
     });
-    // Add quote summary (moved up as requested, no longer on a separate page)
-    doc.moveDown(2);
+    // Add quote summary (moved up with minimal spacing to maximize page use)
+    doc.moveDown(1); // Reduced from 2 to minimize space
     // Center the Quote Summary headline properly
     const pageWidth = doc.page.width - 100; // Account for margins
-    doc.fontSize(14).fillColor('#000000');
+    doc.fontSize(16).fillColor('#000000').font('Helvetica-Bold');
     doc.text('Quote Summary', 50, doc.y, { align: 'center', width: pageWidth });
-    doc.moveDown(1);
+    doc.font('Helvetica');
+    doc.moveDown(0.5); // Reduced from 1 to minimize space
     // Create a summary table
     const summaryStartY = doc.y;
     const summaryColWidth = (doc.page.width - 100) / 2;
@@ -1045,77 +1051,96 @@ const generateQuotePdf = (quoteData) => {
     doc.text(`Total Edging Cost (${totalEdgingMeters.toFixed(2)}m @ R${EDGING_PRICE_PER_METER}/m)`, 60, summaryY + 8);
     doc.text(`R ${totalEdgingCost.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
     summaryY += summaryRowHeight;
-    // Grand total row - highlighted
-    doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight + 10)
-        .fillAndStroke('#003366', '#000000');
-    // Ensure the total text is visible with proper positioning
-    doc.fontSize(14).fillColor('#FFFFFF');
-    doc.text('GRAND TOTAL', 60, summaryY + 12, { continued: false });
-    doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 12, { continued: false });
-    // Calculate how much space we need for branch and banking details combined
-    const branchInfoHeight = branchData ? 100 : 0; // Approximate height for branch info box
-    const bankingDetailsCount = bankingDetails ? Object.keys(bankingDetails).filter(k => {
-        const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'fx_branch'];
-        return !excludeKeys.includes(k) && bankingDetails[k];
-    }).length : 1;
-    const bankingDetailsHeight = 50 + (bankingDetailsCount * 18); // Header + lines
-    const footerHeight = 50; // Space for footer
-    const minimumSpaceNeeded = branchInfoHeight + bankingDetailsHeight + footerHeight;
-    // Check available space
-    const remainingSpace = doc.page.height - doc.y - 50; // 50 is bottom margin
-    // Only add a page break if we absolutely need it AND we're not at the top of a page
-    if (remainingSpace < minimumSpaceNeeded && doc.y > 100) {
+    // Cutting fee row with light green background
+    doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight)
+        .fillAndStroke('#fffff', '#000000'); // Light green background
+    doc.fillColor('#000000');
+    doc.text(`Cutting Fee (R${cuttingFeePerBoard} per board × ${totalBoardsUsed} board(s))`, 60, summaryY + 8);
+    doc.text(`R ${totalCuttingFee.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
+    summaryY += summaryRowHeight;
+    // Grand total row - with only a border and no background
+    doc.rect(50, summaryY, summaryColWidth * 2, summaryRowHeight)
+        .stroke('#000000'); // Only black border, no background fill
+    // Make the grand total bold but consistent with other totals
+    doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold'); // Bold text but normal size
+    doc.text('GRAND TOTAL:', 60, summaryY + 8); // Same positioning as other rows
+    doc.text(`R ${finalTotal.toFixed(2)}`, 60 + summaryColWidth, summaryY + 8);
+    doc.font('Helvetica'); // Reset font
+    // Add space after the total summary
+    doc.moveDown(2);
+    // ===== CONTACT & PAYMENT INFORMATION SECTION =====
+    // Check if we need to add a page break based on remaining space
+    const contactInfoHeight = 300; // Approximate height needed for contact & banking info
+    const remainingSpace = doc.page.height - doc.y - 50; // Space left on current page minus footer
+    // If there's not enough room for contact info, start a new page
+    if (remainingSpace < contactInfoHeight) {
         doc.addPage();
+        doc.y = 50; // Reset y position at top of new page
     }
-    // Proceed directly to branch details without extra spacing to avoid blank pages
-    let branchBlockY = doc.y + 10;
-    if (branchData) {
-        // Draw a light box for branch info
-        doc.rect(50, branchBlockY, doc.page.width - 100, 70).fillAndStroke('#f5f5f5', '#003366');
-        doc.fontSize(12).fillColor('#003366').font('Helvetica-Bold');
-        doc.text(branchData.trading_as || branchData.name || 'Branch', 60, branchBlockY + 10, { width: doc.page.width - 120 });
-        doc.fontSize(9).fillColor('#333333').font('Helvetica');
-        let y = branchBlockY + 28;
-        // List of keys to exclude from rendering (internal IDs, metadata, etc.)
-        const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'branch_id', 'branch_number'];
-        // Define pretty labels for known fields
-        const prettyLabels = {
-            trading_as: 'Trading As',
-            name: 'Name',
-            address1: 'Address 1',
-            address2: 'Address 2',
-            city: 'City',
-            state: 'State',
-            zip: 'ZIP',
-            phone: 'Phone',
-            email: 'Email',
-            website: 'Website',
-            vat: 'VAT Number',
-            registration: 'Company Registration',
-            notes: 'Notes',
-            whatsapp: 'WhatsApp',
-            // Add more known fields as needed
-        };
-        // Render all key/value pairs except excluded ones and name/trading_as (already shown)
-        Object.keys(branchData).forEach((key) => {
-            if (excludeKeys.includes(key) || key === 'trading_as' || key === 'name')
-                return;
-            const value = branchData[key];
-            if (!value)
-                return;
-            const label = prettyLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            doc.text(`${label}: ${value}`, 60, y, { width: doc.page.width - 120 });
-            y += 12;
-        });
-        branchBlockY = y + 12;
-    }
-    // Add payment details and terms - all together to prevent pagination issues
-    doc.fontSize(12).fillColor('#000000');
-    doc.text('Banking Details', 50, branchBlockY + 10);
-    doc.fontSize(10);
+    // Add section header
+    doc.fontSize(16).fillColor('#000000').font('Helvetica-Bold');
+    doc.text('Contact & Payment Information', 50, doc.y, { align: 'center', width: doc.page.width - 100 });
+    doc.font('Helvetica').fontSize(10);
+    doc.moveDown(1);
+    // Use fallback branch data if none is provided
+    const effectiveBranchData = branchData || {
+        name: 'HDS Products',
+        trading_as: 'HDS Products',
+        address1: 'Please contact us for more information',
+        phone: '',
+        email: ''
+    };
+    // Create a light box for branch info
+    const boxStartY = doc.y;
+    doc.rect(50, boxStartY, doc.page.width - 100, 70).fillAndStroke('#f5f5f5', '#003366');
+    // Draw branch name/title
+    doc.fontSize(12).fillColor('#003366').font('Helvetica-Bold');
+    doc.text(effectiveBranchData.trading_as || effectiveBranchData.name || 'Branch', 60, boxStartY + 10, { width: doc.page.width - 120 });
+    // Prepare to list branch details
+    doc.fontSize(9).fillColor('#333333').font('Helvetica');
+    let currentY = boxStartY + 28;
+    // List of keys to exclude from rendering (internal IDs, metadata, etc.)
+    const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'branch_id', 'branch_number'];
+    // Define pretty labels for known fields
+    const prettyLabels = {
+        trading_as: 'Trading As',
+        name: 'Name',
+        address1: 'Address 1',
+        address2: 'Address 2',
+        city: 'City',
+        state: 'State',
+        zip: 'ZIP',
+        phone: 'Phone',
+        email: 'Email',
+        website: 'Website',
+        vat: 'VAT Number',
+        registration: 'Company Registration',
+        notes: 'Notes',
+        whatsapp: 'WhatsApp',
+        // Add more known fields as needed
+    };
+    // Render all key/value pairs except excluded ones and name/trading_as (already shown)
+    Object.keys(effectiveBranchData).forEach((key) => {
+        if (excludeKeys.includes(key) || key === 'trading_as' || key === 'name')
+            return;
+        const value = effectiveBranchData[key];
+        if (!value)
+            return;
+        const label = prettyLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        doc.text(`${label}: ${value}`, 60, currentY, { width: doc.page.width - 120 });
+        currentY += 12;
+    });
+    // Move down past the branch details box
+    doc.y = Math.max(doc.y, boxStartY + 80);
+    doc.moveDown(1);
+    // Add banking details heading
+    doc.fontSize(12).fillColor('#003366').font('Helvetica-Bold');
+    doc.text('Banking Details', 50, doc.y);
+    doc.font('Helvetica').fontSize(10).fillColor('#333333');
+    doc.moveDown(0.5);
     // First collect all banking detail lines
     const bankingLines = [];
-    if (bankingDetails) {
+    if (bankingDetails && Object.keys(bankingDetails).length > 0) {
         const excludeKeys = ['id', 'created_at', 'updated_at', 'uuid', 'fx_branch'];
         const prettyLabels = {
             account_holder: 'Account Holder',
@@ -1138,17 +1163,89 @@ const generateQuotePdf = (quoteData) => {
             const label = prettyLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             bankingLines.push(`${label}: ${value}`);
         });
+        // Ensure we have at least one line
+        if (bankingLines.length === 0) {
+            bankingLines.push('Please contact us for payment information.');
+        }
     }
     else {
-        bankingLines.push('No banking details available for this branch. Please contact us for payment information.');
+        // Add fallback banking details
+        bankingLines.push('Bank: Standard Bank');
+        bankingLines.push('Account Type: Business Account');
+        bankingLines.push('Reference: Please use your quote number as reference');
+        bankingLines.push('Please contact us for complete banking details.');
     }
     // Now render all banking details as a single text block with line breaks
     const bankingText = bankingLines.join('\n');
-    doc.text(bankingText, 50, branchBlockY + 35, { width: doc.page.width - 100 });
-    // Add footer
-    const footerY = doc.page.height - 50;
-    doc.fontSize(8).fillColor('#000000');
-    doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.', 50, footerY, { align: 'center', width: doc.page.width - 100 });
+    doc.text(bankingText, 50, doc.y, { width: doc.page.width - 100 });
+    // Move down a bit
+    doc.moveDown(2);
+    // Add a generic footer to the last page
+    // First make sure we're near the bottom of the page
+    if (doc.y < doc.page.height - 100) {
+        doc.y = doc.page.height - 100;
+    }
+    // Add page numbers to all pages - with enhanced error handling and logging
+    try {
+        // Log the current state of the document before attempting page numbering
+        console.log('Starting page numbering process');
+        // Capture buffered page range - crucial for debugging
+        const range = doc.bufferedPageRange();
+        console.log('PDF bufferedPageRange():', JSON.stringify(range));
+        // Skip page numbering if no pages available or invalid range
+        if (!range || typeof range !== 'object' || !range.count || range.count <= 0) {
+            console.log('Skipping page numbering: No valid pages available');
+        }
+        else {
+            const totalPages = range.count;
+            const startIdx = range.start || 0;
+            console.log(`Adding page numbers: ${totalPages} pages, starting at index ${startIdx}`);
+            // Loop through each page using the actual available range
+            for (let i = 0; i < totalPages; i++) {
+                try {
+                    const pageIdx = startIdx + i;
+                    console.log(`Attempting to switch to page ${pageIdx}`);
+                    // Switch to the page and add numbering
+                    doc.switchToPage(pageIdx);
+                    // Add page number at the bottom
+                    doc.fontSize(8).fillColor('#000000');
+                    doc.text(`Page ${i + 1} of ${totalPages}`, 50, doc.page.height - 50, {
+                        align: 'center',
+                        width: doc.page.width - 100
+                    });
+                    // Add disclaimer
+                    doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.', 50, doc.page.height - 30, {
+                        align: 'center',
+                        width: doc.page.width - 100
+                    });
+                    console.log(`Successfully added numbering to page ${pageIdx}`);
+                }
+                catch (pageError) {
+                    console.error(`Error processing page ${startIdx + i}:`, pageError);
+                    // Continue with next page - don't let one page failure stop the process
+                }
+            }
+            // Try to return to a valid page after page numbering
+            try {
+                // Check if the buffer range has changed
+                const finalRange = doc.bufferedPageRange();
+                console.log('Final bufferedPageRange():', JSON.stringify(finalRange));
+                // Find the last valid page
+                const finalStartIdx = finalRange.start || 0;
+                const finalLastPageIdx = finalStartIdx + finalRange.count - 1;
+                console.log(`Returning to last page: ${finalLastPageIdx}`);
+                doc.switchToPage(finalLastPageIdx);
+            }
+            catch (finalPageError) {
+                console.error('Error returning to last page:', finalPageError);
+                // The document might still be valid even if we can't switch pages
+            }
+        }
+    }
+    catch (error) {
+        // Log the error but allow PDF generation to continue
+        console.error('Error during page numbering process:', error);
+    }
     // Finalize PDF
     doc.end();
     // We need to wait for the PDF to be fully generated
@@ -1157,7 +1254,7 @@ const generateQuotePdf = (quoteData) => {
         doc.on('end', () => {
             // Return the buffer and ID
             resolve({
-                buffer: Buffer.concat(buffers),
+                buffer: buffers.length === 1 ? buffers[0] : buffers,
                 id: pdfId
             });
         });

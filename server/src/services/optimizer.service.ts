@@ -1484,27 +1484,74 @@ export const generateQuotePdf = (quoteData: any): Promise<{ buffer: any, id: str
     doc.y = doc.page.height - 100;
   }
   
-  // Add page numbers to all pages
-  const range = doc.bufferedPageRange();
-  const totalPages = range.count;
-
-  // Loop through each page to add page numbers
-  for (let i = 0; i < totalPages; i++) {
-    doc.switchToPage(i);
+  // Add page numbers to all pages - with enhanced error handling and logging
+  try {
+    // Log the current state of the document before attempting page numbering
+    console.log('Starting page numbering process');
     
-    // Add page number at the bottom
-    doc.fontSize(8).fillColor('#000000');
-    doc.text(`Page ${i + 1} of ${totalPages}`, 50, doc.page.height - 50, { 
-      align: 'center', 
-      width: doc.page.width - 100 
-    });
+    // Capture buffered page range - crucial for debugging
+    const range = doc.bufferedPageRange();
+    console.log('PDF bufferedPageRange():', JSON.stringify(range));
     
-    // Add disclaimer on each page
-    doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.', 
-      50, doc.page.height - 30, { 
-        align: 'center', 
-        width: doc.page.width - 100 
-    });
+    // Skip page numbering if no pages available or invalid range
+    if (!range || typeof range !== 'object' || !range.count || range.count <= 0) {
+      console.log('Skipping page numbering: No valid pages available');
+    } else {
+      const totalPages = range.count;
+      const startIdx = range.start || 0;
+      
+      console.log(`Adding page numbers: ${totalPages} pages, starting at index ${startIdx}`);
+      
+      // Loop through each page using the actual available range
+      for (let i = 0; i < totalPages; i++) {
+        try {
+          const pageIdx = startIdx + i;
+          console.log(`Attempting to switch to page ${pageIdx}`);
+          
+          // Switch to the page and add numbering
+          doc.switchToPage(pageIdx);
+          
+          // Add page number at the bottom
+          doc.fontSize(8).fillColor('#000000');
+          doc.text(`Page ${i + 1} of ${totalPages}`, 50, doc.page.height - 50, {
+            align: 'center',
+            width: doc.page.width - 100
+          });
+          
+          // Add disclaimer
+          doc.text('This is a computer-generated quote and does not require a signature. Valid for 30 days.',
+            50, doc.page.height - 30, {
+              align: 'center',
+              width: doc.page.width - 100
+          });
+          
+          console.log(`Successfully added numbering to page ${pageIdx}`);
+        } catch (pageError) {
+          console.error(`Error processing page ${startIdx + i}:`, pageError);
+          // Continue with next page - don't let one page failure stop the process
+        }
+      }
+      
+      // Try to return to a valid page after page numbering
+      try {
+        // Check if the buffer range has changed
+        const finalRange = doc.bufferedPageRange();
+        console.log('Final bufferedPageRange():', JSON.stringify(finalRange));
+        
+        // Find the last valid page
+        const finalStartIdx = finalRange.start || 0;
+        const finalLastPageIdx = finalStartIdx + finalRange.count - 1;
+        
+        console.log(`Returning to last page: ${finalLastPageIdx}`);
+        doc.switchToPage(finalLastPageIdx);
+      } catch (finalPageError) {
+        console.error('Error returning to last page:', finalPageError);
+        // The document might still be valid even if we can't switch pages
+      }
+    }
+  } catch (error) {
+    // Log the error but allow PDF generation to continue
+    console.error('Error during page numbering process:', error);
   }
   
   // Finalize PDF

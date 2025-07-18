@@ -158,6 +158,7 @@ const generateQuote = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         let grandTotal = 0;
         let totalEdgingLength = 0;
         let edgingCostTotal = 0;
+        let totalBoardsUsed = 0; // Track total boards used for cutting fee
         for (const section of sections) {
             const { material, cutPieces } = section;
             if (!material || !cutPieces || !Array.isArray(cutPieces) || cutPieces.length === 0) {
@@ -266,6 +267,7 @@ const generateQuote = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             });
             // 8. Calculate boards needed and wastage statistics
             const boardsNeeded = solution.stockPieces.length;
+            totalBoardsUsed += boardsNeeded; // Add to total boards for cutting fee
             // Calculate total board area and used area to determine wastage
             const boardArea = length * width * boardsNeeded;
             let usedArea = 0;
@@ -374,8 +376,13 @@ const generateQuote = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         // Generate a unique quote ID
         const now = new Date();
         const quoteId = `Q-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+        // Calculate cutting fee (same as in PDF quote - R70 per board)
+        const cuttingFeePerBoard = 70; // R70 per board
+        const totalCuttingFee = parseFloat((totalBoardsUsed * cuttingFeePerBoard).toFixed(2));
+        // Add cutting fee to grand total
+        grandTotal += totalCuttingFee;
         // Debug log to confirm totals before PDF generation
-        console.log('Quote summary for PDF:', { grandTotal, processedSections });
+        console.log('Quote summary for PDF:', { grandTotal, totalCuttingFee, totalBoardsUsed, processedSections });
         // 8. Generate PDF quotation (now returns buffer instead of file path)
         // Fetch banking details for the selected branch (match trading_as to fx_branch)
         let bankingDetails = null;
