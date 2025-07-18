@@ -69,6 +69,9 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
   // State to track active validation
   const [isValidating, setIsValidating] = useState<boolean>(false);
   
+  // State to track when material validation should be enforced
+  const [showMaterialValidation, setShowMaterialValidation] = useState<boolean>(false);
+  
   // Default material options as fallback
   const DEFAULT_MATERIAL_CATEGORIES = [
     "White Melamine",
@@ -514,8 +517,8 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
       console.log('Looking for material dropdown with ID:', materialDropdownId);
       const materialDropdownElement = document.getElementById(materialDropdownId);
       
-      // Set requireMaterialValidation to true as well to ensure both states trigger validation
-      setRequireMaterialValidation(true);
+      // Set showMaterialValidation to true as well to ensure both states trigger validation
+      setShowMaterialValidation(true);
       
       if (materialDropdownElement) {
         console.log('Found material dropdown element, scrolling to it');
@@ -569,7 +572,7 @@ const EditableCutlistTable: React.FC<EditableCutlistTableProps> = ({
         }, 10000); // Reset validation state after 10 seconds
       }
       
-      setSnackbarMessage('⚠️ Please select a material for all sections before confirming the cutlist');
+      setSnackbarMessage('⚠️ Materials dropdown needs a selection');
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
       return;
@@ -909,8 +912,8 @@ Thank you for your business!
                   <FormControl 
                     fullWidth 
                     size="medium" 
-                    required={requireMaterialValidation || isValidating} 
-                    error={(requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '')}
+                    required={showMaterialValidation || requireMaterialValidation || isValidating} 
+                    error={(showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '')}
                     id={`material-dropdown-${sectionIdx}`}
                     sx={{
                       animation: isValidating && (!section.material || section.material.trim() === '') ? 
@@ -926,7 +929,7 @@ Thank you for your business!
                           boxShadow: '0 0 0 0 rgba(211, 47, 47, 0)',
                         },
                       },
-                      mb: (requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') ? 0 : 2,
+                      mb: (showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') ? 0 : 2,
                       '& .MuiOutlinedInput-root': {
                         fontSize: '1.1rem',
                         fontWeight: 'bold',
@@ -978,7 +981,7 @@ Thank you for your business!
                             <MenuItem key={description} value={description}>{description}</MenuItem>
                         ))}
                     </Select>
-                    {(requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') && (
+                    {(showMaterialValidation || requireMaterialValidation || isValidating) && (!section.material || section.material.trim() === '') && (
                       <Box sx={{ 
                         mt: 1, 
                         mb: 2,
@@ -997,7 +1000,7 @@ Thank you for your business!
                         },
                       }}>
                         <Typography variant="body2" color="error" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                          ⚠️ Please select a material before continuing
+                          ⚠️ Materials dropdown needs a selection
                         </Typography>
                       </Box>
                     )}
@@ -1099,8 +1102,8 @@ Thank you for your business!
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       {/* Material dropdown for desktop view */}
                       <FormControl 
-                        required={requireMaterialValidation} 
-                        error={requireMaterialValidation && (!section.material || section.material.trim() === '')}
+                        required={showMaterialValidation || requireMaterialValidation} 
+                        error={(showMaterialValidation || requireMaterialValidation) && (!section.material || section.material.trim() === '')}
                         id={`material-dropdown-${sectionIndex}`}
                         sx={{
                           minWidth: 200,
@@ -1155,7 +1158,7 @@ Thank you for your business!
                             <MenuItem key={description} value={description}>{description}</MenuItem>
                           ))}
                         </Select>
-                        {requireMaterialValidation && (!section.material || section.material.trim() === '') && (
+                        {(showMaterialValidation || requireMaterialValidation) && (!section.material || section.material.trim() === '') && (
                           <Box sx={{ 
                             position: 'absolute',
                             top: '100%',
@@ -1172,7 +1175,7 @@ Thank you for your business!
                             gap: 1
                           }}>
                             <Typography variant="body2" color="error" sx={{ fontWeight: 'bold', fontSize: '0.75rem' }}>
-                              ⚠️ Material selection required
+                              ⚠️ Materials dropdown needs a selection
                             </Typography>
                           </Box>
                         )}
